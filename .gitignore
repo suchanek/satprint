@@ -1,7 +1,37 @@
 __pycache__/
+.venv/
 *.pyc
 *.stl
 *.egg-info/
 .pytest_cache/
 dist/
 build/
+
+# === KG generated artifacts (normalized across the fleet) ===
+# Databases, vector indexes and model caches are transient and
+# reproducible. snapshots/ is TRACKED and must never be ignored --
+# never use a bare `**/.<ns>/` pattern here, it swallows snapshots too.
+
+**/.pycodekg/*.sqlite
+**/.pycodekg/*.sqlite-shm
+**/.pycodekg/*.sqlite-wal
+**/.pycodekg/*.db
+**/.pycodekg/models
+
+**/.dockg/*.sqlite
+**/.dockg/*.sqlite-shm
+**/.dockg/*.sqlite-wal
+**/.dockg/*.db
+**/.dockg/models
+**/.dockg/embeddings.json
+
+# AgentKG local store -- nothing under it is ever tracked
+**/.agentkg/
+
+# Agent scratch dirs (Claude Code / Codex)
+.agents/
+.codex/
+
+# MCP server config -- machine-specific, contains absolute paths
+.mcp.json.sav
+# === end KG generated artifacts ===

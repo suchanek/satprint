@@ -8,6 +8,7 @@ Sources
 * ``synthetic_heightmap`` — procedural mountains for offline use and tests.
 * ``load_heightmap_file`` — user-supplied PNG / TIFF / GeoTIFF heightmaps.
 """
+
 from __future__ import annotations
 
 import hashlib
@@ -21,10 +22,12 @@ import numpy as np
 import requests
 from PIL import Image
 
-TERRARIUM_URL = "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
+TERRARIUM_URL = (
+    "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
+)
 TILE_SIZE = 256
-MAX_ZOOM = 14          # terrarium tiles exist to z15; z14 (~10 m/px) is plenty
-MAX_TILES = 64         # guard against accidental multi-gigabyte requests
+MAX_ZOOM = 14  # terrarium tiles exist to z15; z14 (~10 m/px) is plenty
+MAX_TILES = 64  # guard against accidental multi-gigabyte requests
 EARTH_RADIUS_M = 6_371_008.8
 
 Image.MAX_IMAGE_PIXELS = 50_000_000
@@ -62,7 +65,7 @@ class BBox:
 
 @dataclass
 class Heightmap:
-    data: np.ndarray                      # (rows, cols) float32 metres; row 0 = north
+    data: np.ndarray  # (rows, cols) float32 metres; row 0 = north
     ground_width_m: float
     ground_height_m: float
     source: str
@@ -86,6 +89,7 @@ class Heightmap:
 # Geodesy helpers
 # ----------------------------------------------------------------------------
 
+
 def haversine_m(lat1, lon1, lat2, lon2) -> float:
     p1, p2 = math.radians(lat1), math.radians(lat2)
     dphi = p2 - p1
@@ -96,7 +100,7 @@ def haversine_m(lat1, lon1, lat2, lon2) -> float:
 
 def lonlat_to_global_px(lon: float, lat: float, zoom: int) -> tuple[float, float]:
     """Web-Mercator pixel coordinates (x right, y down) at ``zoom``."""
-    n = TILE_SIZE * (2 ** zoom)
+    n = TILE_SIZE * (2**zoom)
     x = (lon + 180.0) / 360.0 * n
     lat_r = math.radians(lat)
     y = (1.0 - math.log(math.tan(lat_r) + 1.0 / math.cos(lat_r)) / math.pi) / 2.0 * n
@@ -116,6 +120,7 @@ def choose_zoom(bbox: BBox, target_cols: int) -> int:
 # ----------------------------------------------------------------------------
 # Terrarium tiles
 # ----------------------------------------------------------------------------
+
 
 def decode_terrarium(png_bytes: bytes) -> np.ndarray:
     """Decode a terrarium PNG into float32 metres."""
@@ -139,11 +144,20 @@ def encode_terrarium(elev: np.ndarray) -> bytes:
 class TileFetcher:
     """Fetch + disk-cache terrarium tiles."""
 
-    def __init__(self, cache_dir: str | None = None, session: requests.Session | None = None,
-                 url_template: str = TERRARIUM_URL, timeout: float = 30.0):
-        self.cache_dir = cache_dir or os.path.join(os.path.expanduser("~"), ".cache", "satprint", "tiles")
+    def __init__(
+        self,
+        cache_dir: str | None = None,
+        session: requests.Session | None = None,
+        url_template: str = TERRARIUM_URL,
+        timeout: float = 30.0,
+    ):
+        self.cache_dir = cache_dir or os.path.join(
+            os.path.expanduser("~"), ".cache", "satprint", "tiles"
+        )
         self.session = session or requests.Session()
-        self.session.headers.setdefault("User-Agent", "satprint/0.1 (+terrain relief models)")
+        self.session.headers.setdefault(
+            "User-Agent", "satprint/0.1 (+terrain relief models)"
+        )
         self.url_template = url_template
         self.timeout = timeout
 
@@ -171,8 +185,12 @@ class TileFetcher:
         return decode_terrarium(self.fetch_bytes(z, x, y))
 
 
-def fetch_terrarium(bbox: BBox, target_cols: int = 256, fetcher: TileFetcher | None = None,
-                    workers: int = 8) -> Heightmap:
+def fetch_terrarium(
+    bbox: BBox,
+    target_cols: int = 256,
+    fetcher: TileFetcher | None = None,
+    workers: int = 8,
+) -> Heightmap:
     """Download, mosaic and crop terrain tiles covering ``bbox``.
 
     The result is resampled so that its pixel aspect ratio matches the
@@ -186,27 +204,35 @@ def fetch_terrarium(bbox: BBox, target_cols: int = 256, fetcher: TileFetcher | N
     tx1, ty1 = int(math.ceil(x1 / TILE_SIZE)) - 1, int(math.ceil(y1 / TILE_SIZE)) - 1
     n_tiles = (tx1 - tx0 + 1) * (ty1 - ty0 + 1)
     if n_tiles > MAX_TILES:
-        raise ValueError(f"area needs {n_tiles} tiles at zoom {zoom}; lower the resolution or shrink the area")
+        raise ValueError(
+            f"area needs {n_tiles} tiles at zoom {zoom}; lower the resolution or shrink the area"
+        )
 
     coords = [(tx, ty) for ty in range(ty0, ty1 + 1) for tx in range(tx0, tx1 + 1)]
     with ThreadPoolExecutor(max_workers=min(workers, len(coords))) as pool:
         tiles = list(pool.map(lambda c: fetcher.fetch(zoom, c[0], c[1]), coords))
 
-    mosaic = np.empty(((ty1 - ty0 + 1) * TILE_SIZE, (tx1 - tx0 + 1) * TILE_SIZE), dtype=np.float32)
+    mosaic = np.empty(
+        ((ty1 - ty0 + 1) * TILE_SIZE, (tx1 - tx0 + 1) * TILE_SIZE), dtype=np.float32
+    )
     for (tx, ty), tile in zip(coords, tiles):
         r, c = (ty - ty0) * TILE_SIZE, (tx - tx0) * TILE_SIZE
-        mosaic[r:r + TILE_SIZE, c:c + TILE_SIZE] = tile
+        mosaic[r : r + TILE_SIZE, c : c + TILE_SIZE] = tile
 
     # Crop to the exact bbox in pixel space.
     cx0, cy0 = x0 - tx0 * TILE_SIZE, y0 - ty0 * TILE_SIZE
     cx1, cy1 = x1 - tx0 * TILE_SIZE, y1 - ty0 * TILE_SIZE
-    crop = mosaic[int(cy0):int(math.ceil(cy1)), int(cx0):int(math.ceil(cx1))]
+    crop = mosaic[int(cy0) : int(math.ceil(cy1)), int(cx0) : int(math.ceil(cx1))]
 
     gw, gh = bbox.ground_size_m()
     rows = max(2, int(round(target_cols * gh / gw)))
     data = resample(crop, rows, target_cols)
     return Heightmap(
-        data=data, ground_width_m=gw, ground_height_m=gh, source="terrarium", bbox=bbox,
+        data=data,
+        ground_width_m=gw,
+        ground_height_m=gh,
+        source="terrarium",
+        bbox=bbox,
         meta={"zoom": zoom, "tiles": n_tiles, "native_px": list(crop.shape)},
     )
 
@@ -215,8 +241,10 @@ def fetch_terrarium(bbox: BBox, target_cols: int = 256, fetcher: TileFetcher | N
 # Synthetic terrain (offline demo / tests)
 # ----------------------------------------------------------------------------
 
-def synthetic_heightmap(rows: int = 200, cols: int = 256, seed: int = 0,
-                        ground_width_m: float = 20_000.0) -> Heightmap:
+
+def synthetic_heightmap(
+    rows: int = 200, cols: int = 256, seed: int = 0, ground_width_m: float = 20_000.0
+) -> Heightmap:
     """Procedural alpine-looking terrain with ridges, valleys and a lake."""
     rng = np.random.default_rng(seed)
     y, x = np.mgrid[0:rows, 0:cols].astype(np.float64)
@@ -228,7 +256,9 @@ def synthetic_heightmap(rows: int = 200, cols: int = 256, seed: int = 0,
     amp, cells = 1.0, 4
     for _ in range(6):
         grid = rng.random((cells + 1, cells + 1)).astype(np.float32)
-        layer = np.asarray(Image.fromarray(grid, "F").resize((cols, rows), Image.BICUBIC))
+        layer = np.asarray(
+            Image.fromarray(grid, "F").resize((cols, rows), Image.Resampling.BICUBIC)
+        )
         elev += amp * (layer - 0.5)
         amp *= 0.5
         cells *= 2
@@ -239,21 +269,31 @@ def synthetic_heightmap(rows: int = 200, cols: int = 256, seed: int = 0,
     # Ridged transform for sharper crests.
     elev = 1.0 - np.abs(elev - elev.mean())
     elev = (elev - elev.min()) / (elev.max() - elev.min())
-    elev = 400.0 + 2400.0 * elev ** 1.6
+    elev = 400.0 + 2400.0 * elev**1.6
     # Flat lake in the lowest basin.
     lake = np.percentile(elev, 8)
     elev = np.where(elev < lake, lake, elev)
     gh = ground_width_m * rows / cols
-    return Heightmap(data=elev.astype(np.float32), ground_width_m=ground_width_m,
-                     ground_height_m=gh, source="synthetic", meta={"seed": seed})
+    return Heightmap(
+        data=elev.astype(np.float32),
+        ground_width_m=ground_width_m,
+        ground_height_m=gh,
+        source="synthetic",
+        meta={"seed": seed},
+    )
 
 
 # ----------------------------------------------------------------------------
 # File import
 # ----------------------------------------------------------------------------
 
-def load_heightmap_file(data: bytes, filename: str = "", ground_width_m: float | None = None,
-                        max_cols: int = 1024) -> Heightmap:
+
+def load_heightmap_file(
+    data: bytes,
+    filename: str = "",
+    ground_width_m: float | None = None,
+    max_cols: int = 1024,
+) -> Heightmap:
     """Load a heightmap image. GeoTIFFs use rasterio when available, otherwise
     the file is treated as a plain raster whose values are metres (16-bit PNGs
     are interpreted as metres as well, 8-bit as 0-255 relative units)."""
@@ -264,8 +304,8 @@ def load_heightmap_file(data: bytes, filename: str = "", ground_width_m: float |
 
     if filename.lower().endswith((".tif", ".tiff")):
         try:
-            import rasterio  # optional dependency
-            from rasterio.io import MemoryFile
+            from rasterio.io import MemoryFile  # ty: ignore[unresolved-import]  # optional dependency
+
             with MemoryFile(data) as mem, mem.open() as ds:
                 arr = ds.read(1).astype(np.float32)
                 if ds.nodata is not None:
@@ -300,21 +340,31 @@ def load_heightmap_file(data: bytes, filename: str = "", ground_width_m: float |
         arr = resample(arr, rows, max_cols)
         cols = max_cols
     if gw is None:
-        gw = 30.0 * cols   # assume ~30 m pixels (SRTM-like) if nothing better
+        gw = 30.0 * cols  # assume ~30 m pixels (SRTM-like) if nothing better
         meta["assumed_pixel_m"] = 30.0
     if gh is None:
         gh = gw * rows / cols
-    return Heightmap(data=arr.astype(np.float32), ground_width_m=float(gw), ground_height_m=float(gh),
-                     source="upload", meta=meta)
+    return Heightmap(
+        data=arr.astype(np.float32),
+        ground_width_m=float(gw),
+        ground_height_m=float(gh),
+        source="upload",
+        meta=meta,
+    )
 
 
 # ----------------------------------------------------------------------------
 # Processing
 # ----------------------------------------------------------------------------
 
+
 def resample(arr: np.ndarray, rows: int, cols: int) -> np.ndarray:
     img = Image.fromarray(np.ascontiguousarray(arr, dtype=np.float32), "F")
-    method = Image.BOX if (cols < arr.shape[1] or rows < arr.shape[0]) else Image.BICUBIC
+    method = (
+        Image.Resampling.BOX
+        if (cols < arr.shape[1] or rows < arr.shape[0])
+        else Image.Resampling.BICUBIC
+    )
     return np.asarray(img.resize((cols, rows), method), dtype=np.float32)
 
 
@@ -336,10 +386,10 @@ class PrintParams:
     width_mm: float = 100.0
     base_mm: float = 3.0
     exaggeration: float = 1.5
-    relief_mm: float | None = None       # if set, overrides exaggeration
-    smoothing: float = 0.0               # Gaussian sigma in heightmap pixels
+    relief_mm: float | None = None  # if set, overrides exaggeration
+    smoothing: float = 0.0  # Gaussian sigma in heightmap pixels
     clamp_sea_level: bool = True
-    min_feature_mm: float = 0.0          # reserved for future nozzle-aware filtering
+    min_feature_mm: float = 0.0  # reserved for future nozzle-aware filtering
 
     def __post_init__(self):
         if not (10 <= self.width_mm <= 1000):
@@ -362,10 +412,10 @@ def prepare_relief(hm: Heightmap, p: PrintParams) -> tuple[np.ndarray, dict]:
         elev = np.maximum(elev, 0.0)
     if p.smoothing > 0:
         elev = gaussian_smooth(elev, p.smoothing)
-    lo, hi = float(elev.min()), float(elev.max())
+    lo, hi = float(np.min(elev)), float(np.max(elev))
     span = max(hi - lo, 1e-6)
 
-    mm_per_m_plan = p.width_mm / hm.ground_width_m          # horizontal scale
+    mm_per_m_plan = p.width_mm / hm.ground_width_m  # horizontal scale
     if p.relief_mm is not None:
         z_scale = p.relief_mm / span
         exaggeration = z_scale / mm_per_m_plan
@@ -375,13 +425,20 @@ def prepare_relief(hm: Heightmap, p: PrintParams) -> tuple[np.ndarray, dict]:
     relief = (elev - lo) * z_scale
     depth_mm = p.width_mm * hm.ground_height_m / hm.ground_width_m
     info = {
-        "min_elev_m": lo, "max_elev_m": hi, "relief_m": span,
-        "width_mm": p.width_mm, "depth_mm": depth_mm, "base_mm": p.base_mm,
-        "relief_mm": float(relief.max()), "height_mm": float(relief.max()) + p.base_mm,
+        "min_elev_m": lo,
+        "max_elev_m": hi,
+        "relief_m": span,
+        "width_mm": p.width_mm,
+        "depth_mm": depth_mm,
+        "base_mm": p.base_mm,
+        "relief_mm": float(np.max(relief)),
+        "height_mm": float(np.max(relief)) + p.base_mm,
         "plan_scale": f"1:{int(round(1 / mm_per_m_plan * 1000)):,}",
-        "mm_per_m_plan": mm_per_m_plan, "mm_per_m_vertical": z_scale,
+        "mm_per_m_plan": mm_per_m_plan,
+        "mm_per_m_vertical": z_scale,
         "exaggeration": exaggeration,
-        "rows": int(elev.shape[0]), "cols": int(elev.shape[1]),
+        "rows": int(elev.shape[0]),
+        "cols": int(elev.shape[1]),
     }
     return relief.astype(np.float32), info
 
@@ -391,7 +448,7 @@ def heightmap_png(hm: Heightmap, clamp_sea_level: bool = True) -> bytes:
     elev = hm.data.astype(np.float64)
     if clamp_sea_level:
         elev = np.maximum(elev, 0)
-    lo, hi = elev.min(), elev.max()
+    lo, hi = np.min(elev), np.max(elev)
     norm = (elev - lo) / max(hi - lo, 1e-6)
     gy, gx = np.gradient(elev)
     # light from the north-west, 45 deg elevation

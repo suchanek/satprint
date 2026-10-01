@@ -1,8 +1,12 @@
 import numpy as np
 import pytest
 
-from satprint.mesh import (check_watertight, heightmap_to_mesh, read_binary_stl,
-                           write_binary_stl)
+from satprint.mesh import (
+    check_watertight,
+    heightmap_to_mesh,
+    read_binary_stl,
+    write_binary_stl,
+)
 
 
 @pytest.mark.parametrize("shape", [(2, 2), (3, 5), (40, 25)])

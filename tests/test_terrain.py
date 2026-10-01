@@ -4,15 +4,28 @@ import numpy as np
 import pytest
 from PIL import Image
 
-from satprint.terrain import (BBox, PrintParams, TileFetcher, choose_zoom, decode_terrarium,
-                              encode_terrarium, fetch_terrarium, gaussian_smooth, heightmap_png,
-                              load_heightmap_file, lonlat_to_global_px, prepare_relief,
-                              synthetic_heightmap)
+from satprint.terrain import (
+    BBox,
+    PrintParams,
+    TileFetcher,
+    choose_zoom,
+    decode_terrarium,
+    encode_terrarium,
+    fetch_terrarium,
+    gaussian_smooth,
+    heightmap_png,
+    load_heightmap_file,
+    lonlat_to_global_px,
+    prepare_relief,
+    synthetic_heightmap,
+)
 
 
 def test_terrarium_roundtrip():
     elev = np.linspace(-500, 8000, 256 * 256, dtype=np.float32).reshape(256, 256)
-    assert np.abs(decode_terrarium(encode_terrarium(elev)) - elev).max() < 1 / 256 + 1e-3
+    assert (
+        np.abs(decode_terrarium(encode_terrarium(elev)) - elev).max() < 1 / 256 + 1e-3
+    )
 
 
 def test_mercator_origin_and_zoom():
@@ -33,13 +46,14 @@ def test_bbox_validation():
 
 class FakeFetcher(TileFetcher):
     """Serves a smooth analytic surface so the mosaic can be checked."""
+
     def __init__(self):
         super().__init__(cache_dir="/nonexistent")
         self.calls = []
 
     def fetch_bytes(self, z, x, y):
         self.calls.append((z, x, y))
-        n = 256 * 2 ** z
+        n = 256 * 2**z
         gy, gx = np.mgrid[0:256, 0:256]
         elev = 1000 + (x * 256 + gx) / n * 3000 + (y * 256 + gy) / n * 500
         return encode_terrarium(elev)
@@ -58,7 +72,7 @@ def test_fetch_terrarium_mosaic_matches_bbox():
     # ... and the value matches the analytic function at the bbox centre
     z = hm.meta["zoom"]
     px, py = lonlat_to_global_px(bbox.mid_lon, bbox.mid_lat, z)
-    expected = 1000 + px / (256 * 2 ** z) * 3000 + py / (256 * 2 ** z) * 500
+    expected = 1000 + px / (256 * 2**z) * 3000 + py / (256 * 2**z) * 500
     centre = hm.data[hm.shape[0] // 2, hm.shape[1] // 2]
     assert centre == pytest.approx(expected, abs=2.0)
 
@@ -66,14 +80,18 @@ def test_fetch_terrarium_mosaic_matches_bbox():
 def test_tile_limit():
     f = FakeFetcher()
     with pytest.raises(ValueError):
-        fetch_terrarium(BBox(30, 0, 60, 0.5), target_cols=1024, fetcher=f)  # tall sliver -> hundreds of tiles
+        fetch_terrarium(
+            BBox(30, 0, 60, 0.5), target_cols=1024, fetcher=f
+        )  # tall sliver -> hundreds of tiles
     assert not f.calls
 
 
 def test_synthetic_is_deterministic():
     a, b = synthetic_heightmap(60, 80, seed=3), synthetic_heightmap(60, 80, seed=3)
     assert np.array_equal(a.data, b.data)
-    assert a.max > a.min and a.ground_height_m == pytest.approx(a.ground_width_m * 60 / 80)
+    assert a.max > a.min and a.ground_height_m == pytest.approx(
+        a.ground_width_m * 60 / 80
+    )
 
 
 def test_prepare_relief_scaling():
@@ -101,11 +119,13 @@ def test_sea_level_clamp_and_smoothing():
 
 def test_load_png_heightmaps():
     arr16 = (np.random.rand(30, 40) * 4000).astype(np.uint16)
-    buf = io.BytesIO(); Image.fromarray(arr16).save(buf, format="PNG")
+    buf = io.BytesIO()
+    Image.fromarray(arr16).save(buf, format="PNG")
     hm = load_heightmap_file(buf.getvalue(), "dem.png", ground_width_m=4000)
     assert hm.shape == (30, 40) and hm.max == pytest.approx(arr16.max())
     assert hm.ground_height_m == pytest.approx(3000)
-    buf = io.BytesIO(); Image.fromarray(np.zeros((20, 20), np.uint8)).save(buf, format="PNG")
+    buf = io.BytesIO()
+    Image.fromarray(np.zeros((20, 20), np.uint8)).save(buf, format="PNG")
     hm = load_heightmap_file(buf.getvalue(), "flat.png")
     assert hm.meta["assumed_pixel_m"] == 30.0
     png = heightmap_png(hm)

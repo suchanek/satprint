@@ -1,0 +1,18 @@
+{
+  "mcpServers": {
+    "pycodekg": {
+      "command": "pycodekg-mcp",
+      "args": [
+        "--repo",
+        "."
+      ]
+    },
+    "dockg": {
+      "command": "dockg-mcp",
+      "args": [
+        "--repo",
+        "."
+      ]
+    }
+  }
+}

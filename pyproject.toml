@@ -20,7 +20,7 @@ dependencies = [
 
 [project.optional-dependencies]
 geotiff = ["rasterio>=1.3"]
-dev = ["pytest>=8", "httpx>=0.27"]
+dev = ["pytest>=8", "httpx>=0.27", "ty>=0.0.41", "detect-secrets>=1.5.0"]
 
 [project.scripts]
 satprint = "satprint.cli:main"
@@ -33,3 +33,16 @@ satprint = ["static/*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+
+# ---------------------------------------------------------------------------
+# KG index configuration. dockg and pycodekg are global tools, not
+# dependencies: nothing under satprint/ imports them ("Tools are global",
+# FLEET_STANDARDS).
+# ---------------------------------------------------------------------------
+[tool.pycodekg]
+# Tests skew architectural metrics (fan-in, public API surface, docstring coverage).
+exclude = ["tests"]
+include = ["satprint"]
+
+[tool.dockg]
+exclude = ["__pycache__", "build", "dist", "satprint", "tests"]

@@ -1,4 +1,5 @@
 """FastAPI backend: terrain lookup, model generation, STL download."""
+
 from __future__ import annotations
 
 import base64
@@ -17,9 +18,17 @@ from pydantic import BaseModel, Field
 
 from . import __version__
 from .mesh import Mesh, heightmap_to_mesh, write_binary_stl
-from .terrain import (BBox, Heightmap, PrintParams, TileFetcher, fetch_terrarium,
-                      heightmap_png, load_heightmap_file, prepare_relief,
-                      synthetic_heightmap)
+from .terrain import (
+    BBox,
+    Heightmap,
+    PrintParams,
+    TileFetcher,
+    fetch_terrarium,
+    heightmap_png,
+    load_heightmap_file,
+    prepare_relief,
+    synthetic_heightmap,
+)
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
@@ -36,6 +45,7 @@ PRESETS = [
 # ----------------------------------------------------------------------------
 # In-memory stores with a small LRU cap
 # ----------------------------------------------------------------------------
+
 
 class _LRU:
     def __init__(self, cap: int):
@@ -64,14 +74,15 @@ class StoredModel:
     created: float
 
 
-terrain_cache = _LRU(32)   # key -> Heightmap   (downloads are the slow part)
-upload_store = _LRU(16)    # upload_id -> Heightmap
-model_store = _LRU(32)     # model_id -> StoredModel
+terrain_cache = _LRU(32)  # key -> Heightmap   (downloads are the slow part)
+upload_store = _LRU(16)  # upload_id -> Heightmap
+model_store = _LRU(32)  # model_id -> StoredModel
 
 
 # ----------------------------------------------------------------------------
 # Schemas
 # ----------------------------------------------------------------------------
+
 
 class BBoxIn(BaseModel):
     south: float
@@ -84,7 +95,9 @@ class ModelRequest(BaseModel):
     source: Literal["terrarium", "synthetic", "upload"] = "terrarium"
     bbox: Optional[BBoxIn] = None
     upload_id: Optional[str] = None
-    ground_width_m: Optional[float] = Field(None, gt=0, description="override for uploads")
+    ground_width_m: Optional[float] = Field(
+        None, gt=0, description="override for uploads"
+    )
     seed: int = 0
     resolution: int = Field(256, ge=32, le=1024, description="grid columns")
     width_mm: float = Field(100.0, ge=10, le=1000)
@@ -108,9 +121,13 @@ class ModelResponse(BaseModel):
 # App
 # ----------------------------------------------------------------------------
 
+
 def create_app(tile_fetcher: TileFetcher | None = None) -> FastAPI:
-    app = FastAPI(title="satprint", version=__version__,
-                  description="Turn satellite elevation data into 3D-printable terrain models.")
+    app = FastAPI(
+        title="satprint",
+        version=__version__,
+        description="Turn satellite elevation data into 3D-printable terrain models.",
+    )
     fetcher = tile_fetcher or TileFetcher()
 
     def _terrain_for(req: ModelRequest) -> Heightmap:
@@ -118,7 +135,9 @@ def create_app(tile_fetcher: TileFetcher | None = None) -> FastAPI:
             key = ("synthetic", req.seed, req.resolution)
             hm = terrain_cache.get(key)
             if hm is None:
-                hm = synthetic_heightmap(rows=int(req.resolution * 0.75), cols=req.resolution, seed=req.seed)
+                hm = synthetic_heightmap(
+                    rows=int(req.resolution * 0.75), cols=req.resolution, seed=req.seed
+                )
                 terrain_cache.put(key, hm)
             return hm
         if req.source == "upload":
@@ -126,10 +145,18 @@ def create_app(tile_fetcher: TileFetcher | None = None) -> FastAPI:
                 raise HTTPException(400, "upload_id is required for source=upload")
             hm = upload_store.get(req.upload_id)
             if hm is None:
-                raise HTTPException(404, "upload not found (server restarted?) — upload the file again")
+                raise HTTPException(
+                    404, "upload not found (server restarted?) — upload the file again"
+                )
             if req.ground_width_m:
-                hm = Heightmap(hm.data, req.ground_width_m, req.ground_width_m * hm.data.shape[0] / hm.data.shape[1],
-                               hm.source, hm.bbox, hm.meta)
+                hm = Heightmap(
+                    hm.data,
+                    req.ground_width_m,
+                    req.ground_width_m * hm.data.shape[0] / hm.data.shape[1],
+                    hm.source,
+                    hm.bbox,
+                    hm.meta,
+                )
             return hm
         if req.bbox is None:
             raise HTTPException(400, "bbox is required for source=terrarium")
@@ -137,8 +164,14 @@ def create_app(tile_fetcher: TileFetcher | None = None) -> FastAPI:
             bbox = BBox(**req.bbox.model_dump())
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
-        key = ("terrarium", round(bbox.south, 5), round(bbox.west, 5), round(bbox.north, 5),
-               round(bbox.east, 5), req.resolution)
+        key = (
+            "terrarium",
+            round(bbox.south, 5),
+            round(bbox.west, 5),
+            round(bbox.north, 5),
+            round(bbox.east, 5),
+            req.resolution,
+        )
         hm = terrain_cache.get(key)
         if hm is None:
             try:
@@ -171,39 +204,63 @@ def create_app(tile_fetcher: TileFetcher | None = None) -> FastAPI:
             raise HTTPException(400, f"could not read heightmap: {exc}") from exc
         upload_id = uuid.uuid4().hex[:12]
         upload_store.put(upload_id, hm)
-        return {"upload_id": upload_id, "rows": hm.shape[0], "cols": hm.shape[1],
-                "min_elev_m": hm.min, "max_elev_m": hm.max, "ground_width_m": hm.ground_width_m,
-                "ground_height_m": hm.ground_height_m, "meta": hm.meta}
+        return {
+            "upload_id": upload_id,
+            "rows": hm.shape[0],
+            "cols": hm.shape[1],
+            "min_elev_m": hm.min,
+            "max_elev_m": hm.max,
+            "ground_width_m": hm.ground_width_m,
+            "ground_height_m": hm.ground_height_m,
+            "meta": hm.meta,
+        }
 
     @app.post("/api/model", response_model=ModelResponse)
     def make_model(req: ModelRequest):
         hm = _terrain_for(req)
         try:
-            params = PrintParams(width_mm=req.width_mm, base_mm=req.base_mm, exaggeration=req.exaggeration,
-                                 relief_mm=req.relief_mm, smoothing=req.smoothing,
-                                 clamp_sea_level=req.clamp_sea_level)
+            params = PrintParams(
+                width_mm=req.width_mm,
+                base_mm=req.base_mm,
+                exaggeration=req.exaggeration,
+                relief_mm=req.relief_mm,
+                smoothing=req.smoothing,
+                clamp_sea_level=req.clamp_sea_level,
+            )
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         t0 = time.perf_counter()
         relief, info = prepare_relief(hm, params)
-        mesh: Mesh = heightmap_to_mesh(relief, info["width_mm"], info["depth_mm"], params.base_mm)
+        mesh: Mesh = heightmap_to_mesh(
+            relief, info["width_mm"], info["depth_mm"], params.base_mm
+        )
         stl = write_binary_stl(mesh, name=req.name)
         png = heightmap_png(hm, params.clamp_sea_level)
         vol_cm3 = mesh.volume_mm3() / 1000.0
-        info.update({
-            "triangles": mesh.triangle_count,
-            "volume_cm3": vol_cm3,
-            "est_weight_g_pla_solid": vol_cm3 * 1.24,
-            "est_weight_g_pla_20pct": vol_cm3 * 1.24 * 0.35,   # shell + 20 % infill rule of thumb
-            "stl_bytes": len(stl),
-            "source": hm.source,
-            "source_meta": hm.meta,
-            "ground_width_m": hm.ground_width_m, "ground_height_m": hm.ground_height_m,
-            "generate_seconds": round(time.perf_counter() - t0, 3),
-        })
+        info.update(
+            {
+                "triangles": mesh.triangle_count,
+                "volume_cm3": vol_cm3,
+                "est_weight_g_pla_solid": vol_cm3 * 1.24,
+                "est_weight_g_pla_20pct": vol_cm3
+                * 1.24
+                * 0.35,  # shell + 20 % infill rule of thumb
+                "stl_bytes": len(stl),
+                "source": hm.source,
+                "source_meta": hm.meta,
+                "ground_width_m": hm.ground_width_m,
+                "ground_height_m": hm.ground_height_m,
+                "generate_seconds": round(time.perf_counter() - t0, 3),
+            }
+        )
         model_id = uuid.uuid4().hex[:12]
-        model_store.put(model_id, StoredModel(stl=stl, png=png, info=info, created=time.time()))
-        safe = "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in req.name) or "terrain"
+        model_store.put(
+            model_id, StoredModel(stl=stl, png=png, info=info, created=time.time())
+        )
+        safe = (
+            "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in req.name)
+            or "terrain"
+        )
         return ModelResponse(
             model_id=model_id,
             stl_url=f"/api/model/{model_id}/{safe}.stl",
@@ -220,8 +277,11 @@ def create_app(tile_fetcher: TileFetcher | None = None) -> FastAPI:
         if filename.endswith(".png"):
             return Response(m.png, media_type="image/png")
         if filename.endswith(".stl"):
-            return Response(m.stl, media_type="model/stl",
-                            headers={"Content-Disposition": f'attachment; filename="{filename}"'})
+            return Response(
+                m.stl,
+                media_type="model/stl",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
         if filename == "info.json":
             return m.info
         raise HTTPException(404, "unknown file")

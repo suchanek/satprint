@@ -1,0 +1,45 @@
+repos:
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v5.0.0
+    hooks:
+      - id: trailing-whitespace
+        args: [--markdown-linebreak-ext=md]
+      - id: end-of-file-fixer
+      - id: check-yaml
+      - id: check-toml
+      - id: check-merge-conflict
+      - id: check-added-large-files
+        args: [--maxkb=1000]
+      - id: debug-statements
+
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.22
+    hooks:
+      - id: ruff-check
+        args: [--fix]
+      - id: ruff-format
+
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: ['--baseline', '.secrets.baseline', '--exclude-files', '\.(pycodekg|dockg)/.*']
+
+  # Local hooks call the venv directly, not a bare `ty`/`pytest`: an inherited
+  # VIRTUAL_ENV from another repo would otherwise run the wrong interpreter.
+  # `ty` needs `--python .venv` too, or it resolves site-packages from
+  # VIRTUAL_ENV regardless of which binary started it.
+  - repo: local
+    hooks:
+      - id: ty
+        name: ty
+        entry: .venv/bin/ty check satprint/ --python .venv
+        language: system
+        pass_filenames: false
+        always_run: true
+      - id: pytest
+        name: pytest
+        entry: .venv/bin/pytest --tb=short -q
+        language: system
+        pass_filenames: false
+        always_run: true

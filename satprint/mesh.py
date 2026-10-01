@@ -9,10 +9,12 @@ Coordinate system (millimetres):
     Y  south -> north    (0 .. depth_mm)
     Z  up                (0 at bottom of base)
 """
+
 from __future__ import annotations
 
 import io
 from dataclasses import dataclass
+from typing import overload
 
 import numpy as np
 
@@ -20,7 +22,7 @@ import numpy as np
 @dataclass(frozen=True)
 class Mesh:
     vertices: np.ndarray  # (n, 3) float32
-    faces: np.ndarray     # (m, 3) int64, counter-clockwise seen from outside
+    faces: np.ndarray  # (m, 3) int64, counter-clockwise seen from outside
 
     @property
     def triangle_count(self) -> int:
@@ -47,6 +49,7 @@ def _perimeter_indices(rows: int, cols: int) -> np.ndarray:
     Row 0 is the north edge (max Y); the walk starts at the south-west corner
     and goes east, north, west, south.
     """
+
     def idx(r, c):
         return r * cols + c
 
@@ -79,8 +82,8 @@ def heightmap_to_mesh(
         raise ValueError("base_mm must be positive so the model has a solid floor")
     if not np.isfinite(relief).all():
         raise ValueError("relief_mm contains NaN or infinite values")
-    if relief.min() < 0:
-        relief = relief - relief.min()
+    if np.min(relief) < 0:
+        relief = relief - np.min(relief)
 
     rows, cols = relief.shape
     xs = np.linspace(0.0, width_mm, cols)
@@ -91,10 +94,10 @@ def heightmap_to_mesh(
     # --- top surface: two CCW triangles per grid cell ---------------------
     r = np.arange(rows - 1)[:, None]
     c = np.arange(cols - 1)[None, :]
-    a = (r * cols + c).ravel()          # north-west
-    b = a + 1                           # north-east
-    d = a + cols                        # south-west
-    e = d + 1                           # south-east
+    a = (r * cols + c).ravel()  # north-west
+    b = a + 1  # north-east
+    d = a + cols  # south-west
+    e = d + 1  # south-east
     top_faces = np.concatenate(
         [np.column_stack([a, d, e]), np.column_stack([a, e, b])], axis=0
     )
@@ -124,12 +127,20 @@ def heightmap_to_mesh(
     return Mesh(vertices=vertices, faces=faces)
 
 
-_STL_DTYPE = np.dtype(
-    [("normal", "<f4", (3,)), ("v", "<f4", (3, 3)), ("attr", "<u2")]
-)
+_STL_DTYPE = np.dtype([("normal", "<f4", (3,)), ("v", "<f4", (3, 3)), ("attr", "<u2")])
 
 
-def write_binary_stl(mesh: Mesh, target: str | io.IOBase | None = None, name: str = "satprint") -> bytes | None:
+@overload
+def write_binary_stl(
+    mesh: Mesh, target: None = None, name: str = "satprint"
+) -> bytes: ...
+@overload
+def write_binary_stl(
+    mesh: Mesh, target: str | io.IOBase, name: str = "satprint"
+) -> None: ...
+def write_binary_stl(
+    mesh: Mesh, target: str | io.IOBase | None = None, name: str = "satprint"
+) -> bytes | None:
     """Serialise ``mesh`` as binary STL. Returns bytes when ``target`` is None."""
     tri = mesh.vertices[mesh.faces].astype(np.float32)
     normals = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
@@ -158,7 +169,9 @@ def write_binary_stl(mesh: Mesh, target: str | io.IOBase | None = None, name: st
 def read_binary_stl(data: bytes) -> np.ndarray:
     """Parse binary STL bytes into an (n, 3, 3) float32 triangle array."""
     count = int(np.frombuffer(data[80:84], dtype="<u4")[0])
-    records = np.frombuffer(data[84:84 + count * _STL_DTYPE.itemsize], dtype=_STL_DTYPE)
+    records = np.frombuffer(
+        data[84 : 84 + count * _STL_DTYPE.itemsize], dtype=_STL_DTYPE
+    )
     return records["v"].copy()
 
 

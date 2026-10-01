@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>satprint — satellite terrain to 3D print</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Cpath d=%27M2 28 L12 8 L18 18 L22 12 L30 28 Z%27 fill=%27%23f5a524%27/%3E%3C/svg%3E">
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+      integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
+<link rel="stylesheet" href="/static/style.css">
+<script type="importmap">
+{ "imports": {
+    "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+    "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+} }
+</script>
+</head>
+<body>
+<header>
+  <div class="brand">
+    <span class="logo">▲</span>
+    <div>
+      <h1>satprint</h1>
+      <p>Pick a place on Earth. Get a 3D-printable terrain model.</p>
+    </div>
+  </div>
+  <nav>
+    <a href="/docs" target="_blank" rel="noopener">API</a>
+  </nav>
+</header>
+
+<main>
+  <!-- ───────── 1. Area ───────── -->
+  <section class="panel" id="panel-area">
+    <h2><span class="step">1</span> Choose an area</h2>
+    <div class="toolbar">
+      <button id="btn-draw" class="primary" type="button">Draw rectangle</button>
+      <select id="presets"><option value="">Presets…</option></select>
+      <label class="switch"><input type="checkbox" id="basemap-toggle" checked> Satellite imagery</label>
+    </div>
+    <div id="map" role="application" aria-label="map"></div>
+    <div class="bbox-grid">
+      <label>South <input type="number" id="south" step="0.0001" value="45.93"></label>
+      <label>West <input type="number" id="west" step="0.0001" value="7.58"></label>
+      <label>North <input type="number" id="north" step="0.0001" value="46.02"></label>
+      <label>East <input type="number" id="east" step="0.0001" value="7.72"></label>
+    </div>
+    <p class="hint" id="area-hint"></p>
+
+    <details class="upload">
+      <summary>…or upload your own heightmap (PNG / TIFF / GeoTIFF)</summary>
+      <div class="toolbar">
+        <input type="file" id="file" accept=".png,.tif,.tiff,image/png,image/tiff">
+        <label>Ground width (m) <input type="number" id="ground-width" min="1" step="1" placeholder="auto"></label>
+        <button id="btn-upload" type="button">Upload</button>
+      </div>
+      <p class="hint" id="upload-hint"></p>
+    </details>
+  </section>
+
+  <!-- ───────── 2. Print settings ───────── -->
+  <section class="panel" id="panel-settings">
+    <h2><span class="step">2</span> Print settings</h2>
+    <form id="settings" onsubmit="return false">
+      <label>Model width <span class="unit">mm</span>
+        <input type="number" id="width_mm" min="10" max="1000" step="1" value="120"></label>
+      <label>Base thickness <span class="unit">mm</span>
+        <input type="number" id="base_mm" min="0.5" max="100" step="0.5" value="3"></label>
+      <label>Vertical exaggeration <span class="unit">×</span>
+        <input type="number" id="exaggeration" min="0.1" max="20" step="0.1" value="1.5"></label>
+      <label>Fixed relief height <span class="unit">mm, optional</span>
+        <input type="number" id="relief_mm" min="0.2" max="500" step="0.5" placeholder="use exaggeration"></label>
+      <label>Grid resolution <span class="unit">columns</span>
+        <input type="range" id="resolution" min="64" max="1024" step="64" value="256">
+        <output id="resolution-out">256</output></label>
+      <label>Smoothing <span class="unit">px σ</span>
+        <input type="range" id="smoothing" min="0" max="8" step="0.5" value="0">
+        <output id="smoothing-out">0</output></label>
+      <label class="switch"><input type="checkbox" id="clamp" checked> Flatten sea / below-sea-level areas</label>
+      <label>Model name <input type="text" id="name" value="terrain" maxlength="60"></label>
+      <div class="source-row">
+        <span>Source:</span>
+        <label><input type="radio" name="source" value="terrarium" checked> Satellite elevation (online)</label>
+        <label><input type="radio" name="source" value="synthetic"> Demo terrain (offline)</label>
+        <label><input type="radio" name="source" value="upload" id="source-upload" disabled> Uploaded file</label>
+      </div>
+      <button id="btn-generate" class="primary big" type="button">Generate model</button>
+      <p class="hint" id="status" aria-live="polite"></p>
+    </form>
+  </section>
+
+  <!-- ───────── 3. Preview & download ───────── -->
+  <section class="panel wide" id="panel-preview">
+    <h2><span class="step">3</span> Preview &amp; download</h2>
+    <div class="preview-row">
+      <div id="viewer" aria-label="3D preview"><div class="placeholder">Generate a model to preview it here.<br>Drag to orbit · scroll to zoom · right-drag to pan</div></div>
+      <aside>
+        <img id="hillshade" alt="hillshade preview" hidden>
+        <dl id="stats"></dl>
+        <a id="btn-download" class="primary big" download hidden>Download STL</a>
+        <p class="hint">Tip: for FDM printers keep relief ≥ 1 mm and width ≤ your bed size. Resin printers love 1024-column grids.</p>
+      </aside>
+    </div>
+  </section>
+</main>
+
+<footer>
+  Elevation: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">AWS Terrain Tiles</a>
+  (SRTM, ASTER GDEM, GMTED, ETOPO1, and others) · Imagery © Esri &amp; contributors · Base map © OpenStreetMap contributors
+</footer>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+<script type="module" src="/static/app.js"></script>
+</body>
+</html>

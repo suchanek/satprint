@@ -236,3 +236,14 @@ def test_vector_tiles_fetch_cover_and_cache(tmp_path):
     )
     client.tiles(bbox)
     assert len([c for c in session.calls if "t.example" in c]) == n  # from disk
+
+
+def test_shapes_query_asks_for_roof_shapes_and_landmarks():
+    from satprint.osm import shapes_query
+    from satprint.terrain import BBox
+
+    q = shapes_query(BBox(36.11, -115.17, 36.13, -115.15))
+    assert '["roof:shape"~"^(dome|onion|cone|pyramidal)$"]' in q
+    assert '["wikidata"~"^(Q60749353)$"]' in q
+    assert 'relation["building:part"]' in q
+    assert "(36.11,-115.17,36.13,-115.15)" in q and q.endswith("out body geom qt;")

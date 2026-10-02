@@ -22,8 +22,6 @@ from .buildings import (
     MAX_BUILDING_AREA_KM2,
     bbox_area_km2,
     building_mesh,
-    buildings_from_osm,
-    buildings_from_vector_tiles,
 )
 from .mesh import (
     check_watertight,
@@ -34,7 +32,13 @@ from .mesh import (
     write_binary_stl,
     write_glb,
 )
-from .osm import OSM_ATTRIBUTION, OverpassClient, VectorTileClient
+from .osm import (
+    OSM_ATTRIBUTION,
+    OVERTURE_ATTRIBUTION,
+    OverpassClient,
+    VectorTileClient,
+    fetch_buildings,
+)
 from .terrain import (
     IMAGERY_ATTRIBUTION,
     BBox,
@@ -97,13 +101,17 @@ def _build(args) -> int:
         info["outer_depth_mm"] = info["depth_mm"] + 2 * args.frame
         info["height_mm"] = max(info["height_mm"], frame_h)
     bmesh = None
+    building_credit = (
+        OVERTURE_ATTRIBUTION if args.building_source == "overture" else OSM_ATTRIBUTION
+    )
     if args.buildings:
         assert hm.bbox is not None
         print("fetching buildings ...", file=sys.stderr)
-        if args.building_source == "overpass":
-            found = buildings_from_osm(OverpassClient().buildings(hm.bbox))
-        else:
-            found = buildings_from_vector_tiles(VectorTileClient().tiles(hm.bbox))
+        found, warning = fetch_buildings(
+            args.building_source, hm.bbox, OverpassClient(), VectorTileClient()
+        )
+        if warning:
+            print(f"warning: {warning}", file=sys.stderr)
         bmesh = building_mesh(
             found,
             hm.bbox,
@@ -140,7 +148,7 @@ def _build(args) -> int:
                     buf.getvalue(),
                     name=args.name,
                     copyright=IMAGERY_ATTRIBUTION
-                    + ("; " + OSM_ATTRIBUTION if bmesh and bmesh.count else ""),
+                    + ("; " + building_credit if bmesh and bmesh.count else ""),
                     buildings=bmesh,
                 )
             )
@@ -162,7 +170,16 @@ def _build(args) -> int:
             frame=frame,
         )
         with open(args.threemf, "wb") as fh:
-            fh.write(write_3mf(parts, name=args.name, attribution=OSM_ATTRIBUTION))
+            credits = [OSM_ATTRIBUTION]  # the water
+            if bmesh and bmesh.count:
+                credits.append(building_credit)
+            fh.write(
+                write_3mf(
+                    parts,
+                    name=args.name,
+                    attribution="; ".join(dict.fromkeys(credits)),
+                )
+            )
         info["water_fraction"] = round(float(mask.mean()), 4)
         print(f"wrote {args.threemf}", file=sys.stderr)
     if args.preview:
@@ -261,10 +278,10 @@ def main(argv=None) -> int:
     )
     b.add_argument(
         "--building-source",
-        choices=["openfreemap", "overpass"],
+        choices=["openfreemap", "overpass", "overture"],
         default="openfreemap",
-        help="OpenFreeMap vector tiles (fast, rebuilt weekly) or Overpass "
-        "(latest OSM edits, slower)",
+        help="OpenFreeMap vector tiles (fast, rebuilt weekly), Overpass "
+        "(latest OSM edits, slower) or Overture Maps (needs the overture extra)",
     )
     b.add_argument("-o", "--output", default="terrain.stl")
     b.set_defaults(func=_build)

@@ -17,6 +17,12 @@ Either way, where a building has ``building:part`` shapes the parts are used
 and the outline is dropped, as the OSM Simple 3D Buildings scheme specifies.
 A part's minimum height is ignored: parts are extruded from the ground so
 nothing floats in a print.
+
+Roofs tagged ``roof:shape`` dome, onion, cone or pyramidal get that shape
+(:data:`ROOF_PROFILES`); every other roof is flat. The vector tiles carry no
+roof tags, so :func:`apply_shapes` merges in the shaped buildings from a small
+Overpass query. A few landmarks are replaced by exact shapes from
+:mod:`satprint.landmarks`.
 """
 
 from __future__ import annotations
@@ -29,7 +35,7 @@ from dataclasses import dataclass
 import mapbox_vector_tile
 import numpy as np
 import shapely
-from shapely import LineString, MultiPolygon, Polygon, STRtree, box
+from shapely import LineString, MultiPolygon, Polygon, STRtree, affinity, box
 from shapely.geometry import shape
 from shapely.geometry.polygon import orient
 from shapely.ops import polygonize, unary_union
@@ -45,16 +51,49 @@ _FEET = re.compile(r"^\s*([\d.]+)\s*(ft|')\s*$")
 _NUMBER = re.compile(r"^\s*([\d.]+)\s*(m)?\s*$")
 
 
+Profile = tuple[tuple[float, float], ...]
+
+
+def _dome(n: int = 10) -> Profile:
+    return tuple(
+        (math.cos(t), math.sin(t))
+        for t in (math.pi / 2 * i / n for i in range(1, n + 1))
+    )
+
+
+# Rings above the eave as (scale toward the footprint's centroid, fraction of
+# the roof height); a final scale of 0 is the apex.
+ROOF_PROFILES: dict[str, Profile] = {
+    "dome": _dome(),
+    "onion": (
+        (1.15, 0.12),
+        (1.22, 0.28),
+        (1.12, 0.45),
+        (0.80, 0.62),
+        (0.45, 0.76),
+        (0.20, 0.88),
+        (0.08, 0.95),
+        (0.0, 1.0),
+    ),
+    "cone": ((0.0, 1.0),),
+    "pyramidal": ((0.0, 1.0),),
+}
+
+
 @dataclass(frozen=True)
 class Building:
     footprint: Polygon  # lon/lat
     height_m: float
     is_part: bool = False
+    profile: Profile = ()  # roof rings; empty for a flat roof
+    roof_height_m: float = 0.0  # included in height_m
+    osm_id: str = ""  # "way/123", where the source says
+    wikidata: str = ""
 
 
-def parse_height(tags: dict) -> float:
-    """Building height in meters from OSM tags."""
-    raw = tags.get("height", "").split(";")[0]
+def _parse_length(raw: str) -> float | None:
+    """Meters from an OSM length tag ("45", "45 m", "100 ft"), else None."""
+    raw = raw.split(";")[0]
     if m := _FEET.match(raw):
         return float(m.group(1)) * 0.3048
     if m := _NUMBER.match(raw):
@@ -62,11 +101,58 @@ def parse_height(tags: dict) -> float:
             return float(m.group(1))
         except ValueError:
             pass
+    return None
+
+
+def parse_height(tags: dict) -> float:
+    """Building height in meters from OSM tags."""
+    if (h := _parse_length(tags.get("height", ""))) is not None:
+        return h
     levels = tags.get("building:levels", "").split(";")[0].strip()
     try:
         return max(1.0, float(levels)) * LEVEL_HEIGHT_M
     except ValueError:
         return DEFAULT_HEIGHT_M
+
+
+def radius_m(footprint: Polygon) -> float:
+    """Radius of the circle with the footprint's area, for a lon/lat polygon."""
+    lat = footprint.centroid.y
+    area = footprint.area * 111_320.0**2 * math.cos(math.radians(lat))
+    return math.sqrt(area / math.pi)
+
+
+def roof_shape(
+    shape: str | None, roof_height_m: float | None, height_m: float, footprint: Polygon
+) -> tuple[Profile, float]:
+    """(profile, roof height) for a ``roof:shape`` value; flat if unsupported.
+
+    :param shape: the ``roof:shape`` value.
+    :param roof_height_m: the tagged roof height, or None to use the
+        footprint's radius, a hemisphere for a dome.
+    :param height_m: total height; the roof never exceeds it.
+    :param footprint: lon/lat footprint.
+    """
+    profile = ROOF_PROFILES.get((shape or "").strip().lower(), ())
+    if not profile:
+        return (), 0.0
+    if roof_height_m is None:
+        roof_height_m = radius_m(footprint)
+    return profile, max(0.0, min(roof_height_m, height_m))
+
+
+def parse_roof(
+    tags: dict, height_m: float, footprint: Polygon
+) -> tuple[Profile, float]:
+    """(profile, roof height) from OSM ``roof:shape``, ``roof:height`` and
+    ``roof:levels`` tags."""
+    rh = _parse_length(tags.get("roof:height", ""))
+    if rh is None:
+        try:
+            rh = float(tags.get("roof:levels", "").split(";")[0]) * LEVEL_HEIGHT_M
+        except ValueError:
+            rh = None
+    return roof_shape(tags.get("roof:shape"), rh, height_m, footprint)
 
 
 def _ring(geometry: list[dict]) -> list[tuple[float, float]]:
@@ -125,7 +211,18 @@ def buildings_from_osm(data: dict) -> list[Building]:
         height = parse_height(tags)
         for poly in _polygons(shapely.make_valid(geom) if geom is not None else None):
             if poly.area > 0:
-                (parts if is_part else outlines).append(Building(poly, height, is_part))
+                profile, roof_h = parse_roof(tags, height, poly)
+                (parts if is_part else outlines).append(
+                    Building(
+                        poly,
+                        height,
+                        is_part,
+                        profile,
+                        roof_h,
+                        osm_id=f"{el['type']}/{el.get('id')}",
+                        wikidata=tags.get("wikidata", ""),
+                    )
+                )
 
     if parts:
         tree = STRtree([p.footprint for p in parts])
@@ -191,6 +288,31 @@ def buildings_from_vector_tiles(
     return out
 
 
+def apply_shapes(buildings: list[Building], shaped: list[Building]) -> list[Building]:
+    """Swap in ``shaped`` buildings for the plain copies of them in ``buildings``.
+
+    A plain building is a copy of a shaped one when it contains the shaped
+    footprint's representative point and is within a factor of two of its
+    area. Other overlaps are left to :func:`building_mesh`.
+
+    :param buildings: buildings from a source without roof tags.
+    :param shaped: buildings with roof profiles, from Overpass.
+    :return: ``buildings`` with the copies replaced.
+    """
+    shaped = [s for s in shaped if s.profile]
+    if not shaped or not buildings:
+        return list(buildings) + shaped
+    tree = STRtree([b.footprint for b in buildings])
+    drop: set[int] = set()
+    for s in shaped:
+        pt = s.footprint.representative_point()
+        for i in tree.query(pt, predicate="intersects"):
+            ratio = buildings[i].footprint.area / s.footprint.area
+            if 0.5 <= ratio <= 2.0:
+                drop.add(int(i))
+    return [b for i, b in enumerate(buildings) if i not in drop] + shaped
+
+
 def _mercator(lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """Normalized Web Mercator, x right and y down, both 0..1 over the world."""
     lat_r = np.radians(lat)
@@ -233,9 +355,19 @@ def _sample(
 
 
 def _prism(
-    poly: Polygon, z_bottom: float, z_top: float
+    poly: Polygon,
+    z_bottom: float,
+    z_top: float,
+    profile: Profile = (),
+    roof_mm: float = 0.0,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
-    """Closed prism over ``poly``: (vertices, roof faces, wall+floor faces)."""
+    """Closed prism over ``poly``: (vertices, roof faces, wall+floor faces).
+
+    With a ``profile`` the flat roof is replaced by rings of the exterior
+    scaled toward the centroid, rising ``roof_mm`` above ``z_top``. The
+    caller makes sure ``poly`` has no holes and is star-shaped about its
+    centroid.
+    """
     poly = orient(poly, sign=1.0)  # exterior CCW, holes CW
     rings = [np.asarray(poly.exterior.coords)[:-1]] + [
         np.asarray(r.coords)[:-1] for r in poly.interiors
@@ -273,13 +405,47 @@ def _prism(
         walls.append(np.column_stack([b0, t1, t0]))
         start += k
     floor = roof_f[:, ::-1] + n
-    vertices = np.vstack(
-        [
-            np.column_stack([ring_xy, np.full(n, z_top)]),
-            np.column_stack([ring_xy, np.full(n, z_bottom)]),
-        ]
-    )
-    return vertices, roof_f, np.vstack(walls + [floor])
+    vertices = [
+        np.column_stack([ring_xy, np.full(n, z_top)]),
+        np.column_stack([ring_xy, np.full(n, z_bottom)]),
+    ]
+    if profile:
+        roof_f = _profile_faces(poly, ring_xy, z_top, profile, roof_mm, vertices)
+    return np.vstack(vertices), roof_f, np.vstack(walls + [floor])
+
+
+def _profile_faces(
+    poly: Polygon,
+    ring_xy: np.ndarray,
+    z_top: float,
+    profile: Profile,
+    roof_mm: float,
+    vertices: list[np.ndarray],
+) -> np.ndarray:
+    """Faces of a shaped roof over the exterior ring (indices ``0..k-1``),
+    appending its new vertices to ``vertices``."""
+    k = ring_xy.shape[0]
+    c = np.asarray(poly.centroid.coords[0])
+    nxt = sum(v.shape[0] for v in vertices)
+    prev = np.arange(k)
+    roll = (np.arange(k) + 1) % k
+    faces = []
+    for scale, frac in profile:
+        z = z_top + frac * roof_mm
+        if scale <= 1e-9:
+            vertices.append(np.array([[c[0], c[1], z]]))
+            faces.append(np.column_stack([prev, prev[roll], np.full(k, nxt)]))
+            break
+        ring = c + (ring_xy - c) * scale
+        vertices.append(np.column_stack([ring, np.full(k, z)]))
+        cur = nxt + np.arange(k)
+        faces.append(np.column_stack([prev, prev[roll], cur[roll]]))
+        faces.append(np.column_stack([prev, cur[roll], cur]))
+        prev = cur
+        nxt += k
+    else:
+        raise ValueError("a roof profile must end at an apex (scale 0)")
+    return np.vstack(faces)
 
 
 def building_mesh(
@@ -295,6 +461,7 @@ def building_mesh(
     min_height_mm: float = 0.2,
     min_area_mm2: float = 0.05,
     simplify_mm: float = 0.05,
+    min_roof_mm: float = 0.3,
     progress: Progress | None = None,
 ) -> BuildingMesh:
     """Place ``buildings`` on the terrain block built from ``relief_mm``.
@@ -312,6 +479,8 @@ def building_mesh(
     :param min_height_mm: lowest building height, so small ones still print.
     :param min_area_mm2: footprints smaller than this are dropped.
     :param simplify_mm: footprint simplification tolerance.
+    :param min_roof_mm: shaped roofs lower than this are printed flat, at the
+        building's full height.
     :param progress: called as ``progress("building mesh", done, total)``.
     :return: all buildings as one :class:`BuildingMesh`.
     """
@@ -325,17 +494,74 @@ def building_mesh(
     offset = 0
     count = 0
     footprints: list[tuple[Polygon, float]] = []
+    shaped: list[tuple[Polygon, float, Profile, float]] = []
     for n_done, b in enumerate(buildings):
         if progress and n_done % 500 == 0:
             progress("building mesh", n_done, len(buildings))
         model = shapely.transform(b.footprint, to_model)
         clipped = shapely.make_valid(model.intersection(frame))
         h_mm = max(b.height_m * mm_per_m * scale, min_height_mm)
-        for poly in _polygons(clipped):
-            poly = poly.simplify(simplify_mm, preserve_topology=True)
-            if isinstance(poly, Polygon) and poly.area >= min_area_mm2:
-                footprints.append((poly, h_mm))
-    for poly, h_mm in resolve_overlaps(footprints):
+        pieces = [
+            p.simplify(simplify_mm, preserve_topology=True) for p in _polygons(clipped)
+        ]
+        pieces = [
+            p for p in pieces if isinstance(p, Polygon) and p.area >= min_area_mm2
+        ]
+        roof_mm = min(b.roof_height_m * mm_per_m * scale, h_mm)
+        if (
+            b.profile
+            and roof_mm >= min_roof_mm
+            and len(pieces) == 1
+            and pieces[0].area > 0.99 * model.area  # not cut by the block edge
+            and _star_shaped(pieces[0])
+        ):
+            shaped.append((pieces[0], h_mm - roof_mm, b.profile, roof_mm))
+        else:
+            footprints.extend((p, h_mm) for p in pieces)
+
+    # A shaped roof starts no lower than the flat roofs it stands among, so
+    # a dome set into a taller wing is not left in a pit; if too little of
+    # it shows, it is printed flat. Only footprints at least half its size
+    # count: smaller ones overlapping it, such as a lantern mapped on top
+    # of a dome, are ornaments and give way to it. Then the tallest shaped
+    # solid keeps its roof, a lower shaped one it reaches into goes flat,
+    # and flat footprints give up the area under every shaped one.
+    flat_tree = STRtree([p for p, _ in footprints])
+    raised = []
+    for poly, eave, profile, roof_mm in shaped:
+        top = eave + roof_mm
+        around = [
+            footprints[i][1]
+            for i in flat_tree.query(poly, predicate="intersects")
+            if footprints[i][0].area >= 0.5 * poly.area
+            and footprints[i][0].intersection(poly).area > 0.05 * poly.area
+        ]
+        eave = max([eave, *around])
+        if top - eave >= min_roof_mm:
+            raised.append((poly, eave, profile, top - eave))
+        else:
+            footprints.append((poly, top))
+    raised.sort(key=lambda s: -(s[1] + s[3]))
+    solids: list[tuple[Polygon, float, Profile, float]] = []
+    taken = Polygon()
+    for poly, eave, profile, roof_mm in raised:
+        widest = max(1.0, *(s for s, _ in profile))  # onions bulge out
+        reach = affinity.scale(poly, widest, widest, origin=poly.centroid)
+        if taken.intersection(reach).area > min_area_mm2:
+            rest = shapely.make_valid(poly.difference(taken))
+            footprints.extend((p, eave + roof_mm) for p in _polygons(rest))
+        else:
+            solids.append((poly, eave, profile, roof_mm))
+            taken = taken.union(reach)
+    if not taken.is_empty:
+        footprints = [
+            (p, h)
+            for fp, h in footprints
+            for p in _polygons(shapely.make_valid(fp.difference(taken)))
+        ]
+    solids += [(p, h, (), 0.0) for p, h in resolve_overlaps(footprints)]
+
+    for poly, h_mm, profile, roof_mm in solids:
         if poly.area < min_area_mm2:
             continue
         ring_pts = np.vstack(
@@ -343,7 +569,13 @@ def building_mesh(
             + [np.asarray(r.coords) for r in poly.interiors]
         )
         ground = _sample(relief, width_mm, depth_mm, ring_pts) + base_mm
-        prism = _prism(poly, float(ground.min()) - sink_mm, float(ground.max()) + h_mm)
+        prism = _prism(
+            poly,
+            float(ground.min()) - sink_mm,
+            float(ground.max()) + h_mm,
+            profile,
+            roof_mm,
+        )
         if prism is None:
             continue
         v, r, w = prism
@@ -359,6 +591,18 @@ def building_mesh(
         roof_faces=np.vstack(roofs),
         wall_faces=np.vstack(walls),
         count=count,
+    )
+
+
+def _star_shaped(poly: Polygon) -> bool:
+    """True when ``poly`` has no holes and sees every vertex from its centroid,
+    so scaling its ring toward the centroid stays inside it."""
+    if poly.interiors:
+        return False
+    c = poly.centroid
+    grown = poly.buffer(1e-6)
+    return all(
+        grown.covers(LineString([c, p])) for p in list(poly.exterior.coords)[:-1]
     )
 
 

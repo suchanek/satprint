@@ -45,7 +45,7 @@ The request body takes the same settings as the web app:
 | `texture` | `true` | Also write the textured GLB |
 | `buildings` | `false` | Add OpenStreetMap buildings |
 | `building_scale` | 1 | Building height multiplier |
-| `building_source` | `auto` | `auto`, `openfreemap` or `overpass` |
+| `building_source` | `auto` | `auto`, `openfreemap`, `overpass` or `overture` |
 | `multicolor` | `false` | Also write the multi-color 3MF |
 | `frame_mm` | 0 | Border frame width; 0 for none |
 | `frame_height_mm` | base + 1 | Frame height |
@@ -53,7 +53,8 @@ The request body takes the same settings as the web app:
 
 Buildings, the texture and the multi-color 3MF need a `terrarium` source. When
 one of their downloads fails, you still get the STL, and `info` says why in
-`building_error`, `texture_error` or `water_error`.
+`building_error`, `texture_error` or `water_error`. When the roof shapes could
+not be fetched, the buildings are flat-roofed and `building_warning` says so.
 
 ## Build in the background
 

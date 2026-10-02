@@ -23,8 +23,6 @@ from .buildings import (
     BuildingMesh,
     bbox_area_km2,
     building_mesh,
-    buildings_from_osm,
-    buildings_from_vector_tiles,
 )
 from .mesh import (
     Mesh,
@@ -35,7 +33,14 @@ from .mesh import (
     write_binary_stl,
     write_glb,
 )
-from .osm import OSM_ATTRIBUTION, Geocoder, OverpassClient, VectorTileClient
+from .osm import (
+    OSM_ATTRIBUTION,
+    OVERTURE_ATTRIBUTION,
+    Geocoder,
+    OverpassClient,
+    VectorTileClient,
+    fetch_buildings,
+)
 from .presets import presets as all_presets
 from .terrain import (
     IMAGERY_ATTRIBUTION,
@@ -166,10 +171,11 @@ class ModelRequest(BaseModel):
         le=20,
         description="building height multiplier; 1 = true proportion",
     )
-    building_source: Literal["auto", "openfreemap", "overpass"] = Field(
+    building_source: Literal["auto", "openfreemap", "overpass", "overture"] = Field(
         "auto",
         description="OpenFreeMap vector tiles (fast, rebuilt weekly), Overpass "
-        "(latest OSM edits, slower), or auto: OpenFreeMap, then Overpass",
+        "(latest OSM edits, slower), Overture Maps (OSM plus Microsoft and "
+        "Google footprints; needs the overture extra), or auto: OpenFreeMap, then Overpass",
     )
     frame_mm: float = Field(
         0.0, ge=0, le=30, description="border frame width around the model; 0 = none"
@@ -237,27 +243,22 @@ def create_app(
 
     def _buildings_for(
         bbox: BBox, source: str, progress: Progress | None = None
-    ) -> tuple[list, str]:
-        """Buildings in ``bbox`` and the source that supplied them."""
+    ) -> tuple[list, str | None, str]:
+        """Buildings in ``bbox``, a roof-shape warning, and the source used."""
         order = {"auto": ["openfreemap", "overpass"]}.get(source, [source])
         errors = []
         for name in order:
             key = (name, *_bbox_key(bbox))
             hit = buildings_cache.get(key)
             if hit is not None:
-                return hit, name
+                return *hit, name
             try:
-                if name == "openfreemap":
-                    hit = buildings_from_vector_tiles(
-                        vtiles.tiles(bbox, progress=progress)
-                    )
-                else:
-                    hit = buildings_from_osm(osm.buildings(bbox, progress=progress))
+                hit = fetch_buildings(name, bbox, osm, vtiles, progress)
             except Exception as exc:
                 errors.append(f"{name}: {exc}")
                 continue
             buildings_cache.put(key, hit)
-            return hit, name
+            return *hit, name
         raise RuntimeError("; ".join(errors))
 
     def _texture_for(
@@ -418,7 +419,9 @@ def create_app(
                 )
             else:
                 try:
-                    found, used = _buildings_for(hm.bbox, req.building_source, progress)
+                    found, warning, used = _buildings_for(
+                        hm.bbox, req.building_source, progress
+                    )
                 except Exception as exc:
                     building_info["building_error"] = f"building download failed: {exc}"
                 else:
@@ -436,8 +439,14 @@ def create_app(
                     building_info = {
                         "buildings": bmesh.count,
                         "building_source": used,
-                        "building_attribution": OSM_ATTRIBUTION,
+                        "building_attribution": (
+                            OVERTURE_ATTRIBUTION
+                            if used == "overture"
+                            else OSM_ATTRIBUTION
+                        ),
                     }
+                    if warning:
+                        building_info["building_warning"] = warning
                     if bmesh.count:
                         top = float(bmesh.vertices[:, 2].max())
                         info["height_mm"] = max(info["height_mm"], top)
@@ -467,7 +476,10 @@ def create_app(
                 buildings=bmesh,
                 frame=frame,
             )
-            credits = OSM_ATTRIBUTION if polygons or (bmesh and bmesh.count) else None
+            sources = [OSM_ATTRIBUTION] if polygons else []
+            if bmesh and bmesh.count:
+                sources.append(building_info["building_attribution"])
+            credits = "; ".join(dict.fromkeys(sources)) or None
             threemf = write_3mf(parts, name=req.name, attribution=credits)
             multicolor_info.update(
                 {
@@ -487,7 +499,7 @@ def create_app(
             else:
                 credits = IMAGERY_ATTRIBUTION
                 if bmesh and bmesh.count:
-                    credits += "; " + OSM_ATTRIBUTION
+                    credits += "; " + building_info["building_attribution"]
                 glb = write_glb(
                     body,
                     rows,

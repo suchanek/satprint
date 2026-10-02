@@ -15,6 +15,18 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `linux/arm64`. The install docs now start from `docker run` on that image.
 - **Container healthcheck** on `/api/health`, and a `.dockerignore`.
 
+- **Roof shapes**: roofs tagged `roof:shape` dome, onion, cone or pyramidal
+  are built with that shape, with the height from `roof:height` or
+  `roof:levels`. The OpenFreeMap tiles carry no roof tags, so a small Overpass
+  query adds them; if it fails the roofs stay flat and the build reports
+  `building_warning`.
+- **Landmarks**: exact shapes for buildings that roof tags cannot describe,
+  starting with the Sphere in Las Vegas, which printed as a cylinder.
+- **Overture Maps building source** (`building_source: "overture"`,
+  `--building-source overture`), behind the new `overture` extra. It adds
+  Microsoft and Google footprints to OSM and keeps the roof tags. The Docker
+  image includes it.
+
 ### Changed
 
 - **The Docker image runs as an unprivileged user** (`satprint`, uid 1000), so

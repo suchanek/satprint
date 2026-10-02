@@ -55,8 +55,11 @@ Mount Fuji from real elevation tiles, 120 mm wide, 1.2x exaggeration:
   Chitubox) load the STL without repair.
 - **Buildings** from OpenStreetMap, as closed solids standing on the terrain.
   Landmark towers keep their setbacks where OSM maps them as `building:part`
-  shapes, and overlapping footprints are merged so no two solids pass through
-  each other. Heights are in true proportion by default, with a multiplier.
+  shapes, domes, onion domes, cones and pyramids get their roof shapes, and
+  overlapping footprints are merged so no two solids pass through each other.
+  A few landmarks, such as the Sphere in Las Vegas, get exact shapes. Heights
+  are in true proportion by default, with a multiplier. OpenFreeMap, Overpass
+  or Overture Maps.
 - **Multi-color 3MF.** Land, water, buildings and an optional border frame are
   separate parts of one object, already on filaments 1 to 4 in Bambu Studio.
   Water is the OSM sea, rivers and lakes, plus the flattened sea.
@@ -202,7 +205,8 @@ curl -s localhost:7417/api/model -H 'content-type: application/json' -d '{
 | Elevation | [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) | `~/.cache/satprint/tiles` |
 | Imagery (GLB texture) | Esri World Imagery | `~/.cache/satprint/imagery` |
 | Buildings and water | [OpenFreeMap](https://openfreemap.org) vector tiles, zoom 14, rebuilt from OSM about weekly | `~/.cache/satprint/vtiles` |
-| Buildings, fallback | [Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API), 0.01° tiles | `~/.cache/satprint/osm/tiles` |
+| Buildings, fallback; roof shapes | [Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API), 0.01° tiles | `~/.cache/satprint/osm` |
+| Buildings, optional | [Overture Maps](https://overturemaps.org) GeoParquet on S3, per release | `~/.cache/satprint/overture` |
 | Place search | [Nominatim](https://nominatim.org), one request per second | in memory |
 
 - **Buildings.** A building with no `height` or `building:levels` tag gets 8 m.
@@ -211,6 +215,21 @@ curl -s localhost:7417/api/model -H 'content-type: application/json' -d '{
   when sliced. Areas are limited to 40 km² with buildings on, and very small
   footprints are dropped. A building that crosses a vector-tile edge arrives as
   two solids that meet at the edge.
+- **Roof shapes.** Roofs tagged `roof:shape` dome, onion, cone or pyramidal
+  get that shape, from `roof:height` or `roof:levels`, else a hemisphere-like
+  height from the footprint's size. Other roofs are flat. The vector tiles
+  carry no roof tags, so a small Overpass query adds them; if it fails, the
+  roofs are flat and the build says so. A shaped roof starts no lower than the
+  larger flat roofs around it, and smaller parts overlapping it, such as a
+  lantern on a dome, are left out so the solids never pass through each other.
+- **Landmarks.** A few buildings that roof tags cannot describe are replaced by
+  exact shapes from published dimensions: so far the Sphere in Las Vegas, a
+  157 m sphere cut by the ground at 112 m.
+- **Overture Maps.** Choose it with "Building data" or
+  `--building-source overture`. It merges OSM with Microsoft and Google
+  footprints, so it finds buildings OSM lacks, and keeps the roof tags. It
+  needs the `overture` extra (`pip install "satprint[overture]"`, about
+  190 MB with pyarrow; the Docker image has it).
 - **Overpass.** Choose it with "Building data" in the web app or
   `--building-source overpass` on the CLI, for the latest OSM edits. The
   default "auto" uses it only if OpenFreeMap fails. Its tiles download two at a
@@ -240,7 +259,9 @@ curl -s localhost:7417/api/model -H 'content-type: application/json' -d '{
 satprint/
   terrain.py    elevation sources (terrain tiles, synthetic, file), imagery, scaling, hillshade
   mesh.py       heightmap to watertight solid, land/water split, frame, STL, GLB and 3MF writers
-  buildings.py  OSM buildings to closed solids on the terrain
+  buildings.py  OSM buildings to closed solids on the terrain, roof shapes
+  landmarks.py  exact shapes for a few landmarks
+  overture.py   Overture Maps building source (overture extra)
   water.py      water map and the multi-color 3MF parts
   osm.py        OpenFreeMap, Overpass and Nominatim clients
   presets.py    named example areas
@@ -282,7 +303,8 @@ MIT. See [LICENSE](LICENSE).
 Map data: Terrain Tiles © Mapzen and AWS Open Data (SRTM, ASTER GDEM, GMTED2010,
 ETOPO1, NED, EU-DEM and others). Imagery © Esri, Maxar, Earthstar Geographics.
 Street map, buildings, water and search © OpenStreetMap contributors, under the
-ODbL.
+ODbL. Overture buildings © Overture Maps Foundation and OpenStreetMap
+contributors, under the ODbL.
 
 ## Citation
 

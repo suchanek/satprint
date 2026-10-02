@@ -2,7 +2,7 @@ FROM python:3.12-slim
 WORKDIR /app
 COPY pyproject.toml README.md LICENSE ./
 COPY satprint ./satprint
-RUN pip install --no-cache-dir --root-user-action=ignore .
+RUN pip install --no-cache-dir --root-user-action=ignore ".[overture]"
 # Run unprivileged. The cache directory is created here so a named volume
 # mounted on it inherits the satprint user's ownership.
 RUN useradd --create-home --uid 1000 satprint \

@@ -410,12 +410,13 @@ def test_non_star_footprint_falls_back_to_flat():
 def test_apply_shapes_replaces_copies_only():
     from satprint.buildings import ROOF_PROFILES, Building, apply_shapes
 
-    plain_copy = Building(box(0, 0, 1, 1), 30)
+    plain_copy = Building(box(0, 0, 1, 1), 31)  # tiles round heights up
     neighbor = Building(box(2, 0, 3, 1), 10)
     big = Building(box(-5, -5, 5, 5), 5)  # contains the dome but much larger
+    drum = Building(box(-0.1, -0.1, 1.1, 1.1), 20)  # under it, its size
     dome = Building(box(0.05, 0.05, 0.95, 0.95), 30, profile=ROOF_PROFILES["dome"])
-    out = apply_shapes([plain_copy, neighbor, big], [dome])
-    assert out == [neighbor, big, dome]
+    out = apply_shapes([plain_copy, neighbor, big, drum], [dome])
+    assert out == [neighbor, big, drum, dome]
     assert apply_shapes([neighbor], [Building(box(0, 0, 1, 1), 5)]) == [neighbor]
 
 
@@ -578,6 +579,38 @@ def test_lantern_below_the_cut_is_left_inside_the_dome():
     found = buildings_from_osm({"elements": [dome, stub]})
     bm = building_mesh(found, BBOX, relief, width, depth, 3.0, mm_per_m)
     assert bm.count == 1
+    assert check_watertight(bm.as_mesh())["watertight"]
+    z = bm.vertices[:, 2]
+    assert (z == z.max()).sum() == 1
+
+
+def test_small_dome_keeps_its_shape_after_simplification():
+    # a 24-sided dome about 2 mm across: simplifying at 0.05 mm drops
+    # corners and more than 1% of its area, which is not a cut by the edge
+    import math
+
+    r = 0.00012
+    pts = [
+        (
+            40.005 + r * math.sin(2 * math.pi * i / 24),
+            -73.995 + r * math.cos(2 * math.pi * i / 24),
+        )
+        for i in range(24)
+    ]
+    data = {
+        "elements": [
+            way(
+                _geom(*pts, pts[0]),
+                building="yes",
+                height="60",
+                **{"roof:shape": "dome", "roof:height": "12"},
+            )
+        ]
+    }
+    relief, width, depth, mm_per_m = _block()
+    bm = building_mesh(
+        buildings_from_osm(data), BBOX, relief, width, depth, 3.0, mm_per_m
+    )
     assert check_watertight(bm.as_mesh())["watertight"]
     z = bm.vertices[:, 2]
     assert (z == z.max()).sum() == 1

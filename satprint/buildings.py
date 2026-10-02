@@ -292,8 +292,10 @@ def apply_shapes(buildings: list[Building], shaped: list[Building]) -> list[Buil
     """Swap in ``shaped`` buildings for the plain copies of them in ``buildings``.
 
     A plain building is a copy of a shaped one when it contains the shaped
-    footprint's representative point and is within a factor of two of its
-    area. Other overlaps are left to :func:`building_mesh`.
+    footprint's representative point, is within a factor of two of its area
+    and has its height, within the tiles' rounding to whole meters. Other
+    overlaps, such as the drum under a dome, are left to
+    :func:`building_mesh`.
 
     :param buildings: buildings from a source without roof tags.
     :param shaped: buildings with roof profiles, from Overpass.
@@ -307,8 +309,9 @@ def apply_shapes(buildings: list[Building], shaped: list[Building]) -> list[Buil
     for s in shaped:
         pt = s.footprint.representative_point()
         for i in tree.query(pt, predicate="intersects"):
-            ratio = buildings[i].footprint.area / s.footprint.area
-            if 0.5 <= ratio <= 2.0:
+            b = buildings[i]
+            ratio = b.footprint.area / s.footprint.area
+            if 0.5 <= ratio <= 2.0 and abs(b.height_m - s.height_m) <= 1.5:
                 drop.add(int(i))
     return [b for i, b in enumerate(buildings) if i not in drop] + shaped
 
@@ -539,7 +542,7 @@ def building_mesh(
             b.profile
             and roof_mm >= min_roof_mm
             and len(pieces) == 1
-            and pieces[0].area > 0.99 * model.area  # not cut by the block edge
+            and clipped.area > 0.99 * model.area  # not cut by the block edge
             and _star_shaped(pieces[0])
         ):
             shaped.append((pieces[0], h_mm - roof_mm, b.profile, roof_mm))

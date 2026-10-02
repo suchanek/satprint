@@ -1,0 +1,55 @@
+# Publish a GitHub Release on tag push.
+#
+# Pushing a `v*` tag builds the wheel and sdist and creates the Release from
+# release-notes.md, with both files attached. Zenodo archives every published
+# Release and mints a version DOI under the project's concept DOI, once the
+# repository is switched on in Zenodo's GitHub settings.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write  # needed to create the GitHub Release
+
+jobs:
+  release:
+    name: Build & Release
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      # The tag and the package version must agree, or the Release and its
+      # Zenodo archive name a version the files do not carry.
+      - name: Check the tag matches the package version
+        run: |
+          VERSION="$(poetry version --short)"
+          if [ "v$VERSION" != "$GITHUB_REF_NAME" ]; then
+            echo "tag $GITHUB_REF_NAME does not match pyproject version $VERSION"
+            exit 1
+          fi
+
+      - name: Build wheel and sdist
+        run: poetry build
+
+      - name: Create GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" dist/* \
+            --title "satprint $GITHUB_REF_NAME" \
+            --notes-file release-notes.md

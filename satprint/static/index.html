@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>satprint — satellite terrain to 3D print</title>
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 32 32%27%3E%3Cpath d=%27M2 28 L12 8 L18 18 L22 12 L30 28 Z%27 fill=%27%23f5a524%27/%3E%3C/svg%3E">
+<link rel="icon" type="image/svg+xml" href="/static/satprint-mark.svg">
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 <link rel="stylesheet" href="/static/style.css">
@@ -18,7 +18,7 @@
 <body>
 <header>
   <div class="brand">
-    <span class="logo">▲</span>
+    <img class="logo" src="/static/satprint-mark.svg" alt="" width="44" height="41">
     <div>
       <h1>satprint</h1>
       <p>Pick a place on Earth. Get a 3D-printable terrain model.</p>
@@ -84,6 +84,11 @@
       <label class="switch"><input type="checkbox" id="clamp" checked> Flatten sea / below-sea-level areas</label>
       <label class="switch"><input type="checkbox" id="texture" checked> Drape satellite imagery (GLB, satellite elevation only)</label>
       <label class="switch"><input type="checkbox" id="buildings"> Add buildings from OpenStreetMap (areas up to 40 km²)</label>
+      <label class="switch"><input type="checkbox" id="multicolor"> Multi-color 3MF: land, water, buildings and border as separate parts (multi-material printers)</label>
+      <label>Border frame <span class="unit">mm wide, 0 = none</span>
+        <input type="number" id="frame_mm" min="0" max="30" step="0.5" value="0"></label>
+      <label>Frame height <span class="unit">mm, blank = base + 1</span>
+        <input type="number" id="frame_height_mm" min="0.5" max="100" step="0.5" placeholder="auto"></label>
       <label>Building height <span class="unit">×, 1 = true proportion</span>
         <input type="number" id="building_scale" min="0.25" max="20" step="0.25" value="1"></label>
       <label>Building data
@@ -115,6 +120,7 @@
         <dl id="stats"></dl>
         <a id="btn-download" class="primary big" download hidden>Download STL</a>
         <a id="btn-download-glb" class="secondary big" download hidden>Download textured GLB</a>
+        <a id="btn-download-3mf" class="secondary big" download hidden>Download multi-color 3MF</a>
         <p class="hint">Tip: for FDM printers keep relief ≥ 1 mm and width ≤ your bed size. Resin printers love 1024-column grids.</p>
       </aside>
     </div>

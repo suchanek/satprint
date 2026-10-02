@@ -69,7 +69,7 @@ class BBox:
         return (self.west + self.east) / 2
 
     def ground_size_m(self) -> tuple[float, float]:
-        """(width, height) in metres along the bbox's central lines."""
+        """(width, height) in meters along the bbox's central lines."""
         w = haversine_m(self.mid_lat, self.west, self.mid_lat, self.east)
         h = haversine_m(self.south, self.mid_lon, self.north, self.mid_lon)
         return w, h
@@ -77,7 +77,7 @@ class BBox:
 
 @dataclass
 class Heightmap:
-    data: np.ndarray  # (rows, cols) float32 metres; row 0 = north
+    data: np.ndarray  # (rows, cols) float32 meters; row 0 = north
     ground_width_m: float
     ground_height_m: float
     source: str
@@ -181,7 +181,7 @@ def _mosaic(
         ((ty1 - ty0 + 1) * TILE_SIZE, (tx1 - tx0 + 1) * TILE_SIZE) + tiles[0].shape[2:],
         dtype=tiles[0].dtype,
     )
-    for (tx, ty), tile in zip(coords, tiles):
+    for (tx, ty), tile in zip(coords, tiles, strict=True):
         r, c = (ty - ty0) * TILE_SIZE, (tx - tx0) * TILE_SIZE
         mosaic[r : r + TILE_SIZE, c : c + TILE_SIZE] = tile
 
@@ -200,7 +200,7 @@ def _mosaic(
 
 
 def decode_terrarium(png_bytes: bytes) -> np.ndarray:
-    """Decode a terrarium PNG into float32 metres."""
+    """Decode a terrarium PNG into float32 meters."""
     img = Image.open(io.BytesIO(png_bytes)).convert("RGB")
     rgb = np.asarray(img, dtype=np.float32)
     return rgb[..., 0] * 256.0 + rgb[..., 1] + rgb[..., 2] / 256.0 - 32768.0
@@ -299,7 +299,7 @@ def fetch_terrarium(
     """Download, mosaic and crop terrain tiles covering ``bbox``.
 
     The result is resampled so that its pixel aspect ratio matches the
-    ground aspect ratio (width/height in metres), with ``target_cols`` columns.
+    ground aspect ratio (width/height in meters), with ``target_cols`` columns.
     """
     fetcher = fetcher or TileFetcher()
     zoom = choose_zoom(bbox, target_cols)
@@ -403,8 +403,8 @@ def load_heightmap_file(
     max_cols: int = 1024,
 ) -> Heightmap:
     """Load a heightmap image. GeoTIFFs use rasterio when available, otherwise
-    the file is treated as a plain raster whose values are metres (16-bit PNGs
-    are interpreted as metres as well, 8-bit as 0-255 relative units)."""
+    the file is treated as a plain raster whose values are meters (16-bit PNGs
+    are interpreted as meters as well, 8-bit as 0-255 relative units)."""
     arr: np.ndarray | None = None
     meta: dict = {"filename": filename}
     gw = ground_width_m
@@ -412,7 +412,8 @@ def load_heightmap_file(
 
     if filename.lower().endswith((".tif", ".tiff")):
         try:
-            from rasterio.io import MemoryFile  # ty: ignore[unresolved-import]  # optional dependency
+            # rasterio is the optional `geotiff` extra.
+            from rasterio.io import MemoryFile  # ty: ignore[unresolved-import]
 
             with MemoryFile(data) as mem, mem.open() as ds:
                 arr = ds.read(1).astype(np.float32)

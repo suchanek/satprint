@@ -1,0 +1,32 @@
+cff-version: "1.2.0"
+message: "If you use this software, please cite it using the metadata below."
+type: software
+title: "satprint: Satellite Terrain to 3D-Printable Models"
+abstract: >
+  satprint turns satellite elevation data into watertight, 3D-printable
+  terrain models scaled to the printer, with a solid base. Cities can carry
+  their OpenStreetMap buildings as closed solids, and a multi-color 3MF splits
+  the model into land, water, buildings and a border frame for multi-material
+  printers. A textured GLB drapes satellite imagery over the terrain for
+  viewing. It runs as a web app, a command-line tool and a REST API.
+authors:
+  - family-names: Suchanek
+    given-names: "Eric G., PhD"
+    orcid: "https://orcid.org/0009-0009-0891-1507"
+    email: suchanek@flux-frontiers.com
+    affiliation: "Flux-Frontiers"
+version: "0.1.0"
+# date-released is set at the first release, and doi once Zenodo has archived
+# it: the concept DOI, which always resolves to the newest version.
+license: MIT
+repository-code: "https://github.com/suchanek/satprint"
+url: "https://suchanek.github.io/satprint/"
+keywords:
+  - 3d-printing
+  - terrain
+  - digital-elevation-model
+  - openstreetmap
+  - stl
+  - 3mf
+  - gltf
+  - multi-material

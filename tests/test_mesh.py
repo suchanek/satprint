@@ -6,6 +6,7 @@ from PIL import Image
 
 from satprint.mesh import (
     check_watertight,
+    frame_mesh,
     heightmap_to_mesh,
     read_binary_stl,
     read_glb,
@@ -96,7 +97,7 @@ def test_glb_drapes_texture_over_top_surface():
     start = view["byteOffset"]
     assert bin_chunk[start : start + view["byteLength"]] == jpeg
 
-    # metres, Y up: width along X, height along Y, depth along -Z
+    # meters, Y up: width along X, height along Y, depth along -Z
     pos = _accessor(doc, bin_chunk, sides["attributes"]["POSITION"], "<f4", 3)
     assert pos[:, 0].max() == pytest.approx(0.090, abs=1e-6)
     assert pos[:, 1].max() == pytest.approx((relief.max() + 2) / 1000, rel=1e-6)
@@ -125,3 +126,13 @@ def test_glb_rejects_mismatched_grid():
         write_glb(mesh, 5, 5, b"x")
     with pytest.raises(ValueError):
         read_glb(b"not a glb at all")
+
+
+def test_frame_is_a_closed_ring_around_the_block():
+    m = frame_mesh(100, 80, 5, 4)
+    assert check_watertight(m)["watertight"]
+    assert m.volume_mm3() == pytest.approx((110 * 90 - 100 * 80) * 4)
+    lo, hi = m.bounds()
+    assert tuple(lo) == (-5, -5, 0) and tuple(hi) == (105, 85, 4)
+    with pytest.raises(ValueError):
+        frame_mesh(10, 10, 0, 4)

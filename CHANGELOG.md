@@ -6,7 +6,30 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **Poetry packaging**, as in the rest of the fleet: `poetry-core` builds the
+  package, the dev and docs tooling are optional Poetry groups, and
+  `poetry.lock` records the versions. `requirements.txt` is gone. Python 3.12
+  or 3.13 is required. The ruff rule set is listed in `pyproject.toml`, so the
+  pinned pre-commit ruff and the newest ruff in CI check the same rules.
+
 ### Added
+
+- **Border frame** (`frame_mm` and `frame_height_mm`, `--frame` and
+  `--frame-height`): a closed rectangular ring around the model, against its
+  walls, 1 mm above the base by default. It goes into the STL and GLB, and
+  into the multi-color 3MF as a fourth part, `border`, on filament 4.
+- **Multi-color 3MF** (`"multicolor": true`, `--3mf`). The terrain block is
+  split along a water map into two closed solids that meet exactly, land and
+  water, and buildings are a third part. The three are named, colored parts
+  of one 3MF object, so a multi-material printer prints each in its own
+  filament. Water is the OSM `water` layer of the OpenFreeMap tiles (sea,
+  rivers, lakes; not swimming pools), plus the flattened sea. The 3MF reads
+  in lib3mf's strict mode with no warnings, and every part is manifold. A
+  Bambu-style `Metadata/model_settings.config` names the parts and puts
+  land, water and buildings on filaments 1, 2 and 3; Bambu Studio 2.08 opens
+  the file as one object with those three parts and assignments.
 
 - **Terrain models from satellite elevation.** Pick an area and get a
   watertight STL: the terrain surface on top, four walls and a flat base, with
@@ -27,7 +50,9 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   standing on the terrain, sunk 0.3 mm so they fuse with it when sliced, in
   both the STL and the GLB. In the GLB, roofs take the satellite texture.
   Where a building is mapped as `building:part` shapes, the parts replace the
-  outline, so towers keep their setbacks. Heights are in true proportion by
+  outline, so towers keep their setbacks. Overlapping footprints, which OSM
+  has plenty of, are merged first: each overlap takes the tallest height
+  covering it, so building solids touch but never pass through each other. Heights are in true proportion by
   default, with a multiplier. Areas are limited to 40 km² with buildings on.
 - **Two building sources.** OpenFreeMap vector tiles are the default: zoom-14
   tiles from a CDN, no key, cached under `~/.cache/satprint/vtiles`. Midtown
@@ -51,6 +76,26 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   Interactive docs are at `/docs`.
 - **CLI**: `satprint build` with `--bbox`, `--file` or `--synthetic`, plus
   `--glb`, `--buildings`, `--building-scale` and `--building-source`.
+- **Logo**: an isometric relief block in the four print colors (land, water,
+  buildings and peaks, and the border frame as its sides), in
+  `docs/brand/`: the mark, and light and dark lockups with the name. The
+  README shows the lockup for the reader's color scheme, and the web app uses
+  the mark as its favicon and header logo.
+- **README in the fleet format**: a badge row (Python, license, version,
+  pre-commit, ORCID), a multi-color printing guide with the filament table,
+  a data-sources table, and a Citation section with APA and BibTeX entries.
+  `CITATION.cff` carries the same metadata, and `LICENSE` holds the MIT terms
+  `pyproject.toml` already declared.
+- **Documentation site** at https://suchanek.github.io/satprint/, built with
+  MkDocs Material from `docs/` as quiltwright's is: guides for installation,
+  the web app, multi-color printing, the CLI, the REST API, and data sources
+  and limits, plus an API reference generated from the docstrings by
+  mkdocstrings. The `docs.yml` workflow builds it with `--strict` and deploys
+  it to GitHub Pages.
+- **Workflows**: `tests.yml` (ruff, ty, pytest on Python 3.12 and 3.13, and a
+  clean install of the built package that builds a model), `docs.yml`, and
+  `release.yml`, which creates the GitHub Release from `release-notes.md` on a
+  `v*` tag for Zenodo to archive.
 - **Development tooling**: a pre-commit configuration running the standard
   file checks, ruff, detect-secrets, ty and pytest; `[tool.pycodekg]` and
   `[tool.dockg]` index settings and an `.mcp.json` for the KG tools, which are

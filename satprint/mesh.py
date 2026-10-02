@@ -1,11 +1,12 @@
 """Heightmap -> watertight, 3D-printable solid (binary STL), plus a
-textured glTF binary (GLB) for viewing.
+textured glTF binary (GLB) for viewing and a multi-part 3MF for
+multi-material printers.
 
 The model is a rectangular block: a terrain surface on top, four vertical
 walls and a flat bottom. Every edge is shared by exactly two triangles with
 consistent outward-facing winding, so slicers accept it without repair.
 
-Coordinate system (millimetres):
+Coordinate system (millimeters):
     X  west -> east      (0 .. width_mm)
     Y  south -> north    (0 .. depth_mm)
     Z  up                (0 at bottom of base)
@@ -16,6 +17,7 @@ from __future__ import annotations
 import io
 import json
 import struct
+import zipfile
 from dataclasses import dataclass
 from typing import overload
 
@@ -73,9 +75,9 @@ def merge_meshes(*meshes: Mesh) -> Mesh:
     offsets = np.cumsum([0] + [m.vertices.shape[0] for m in meshes[:-1]])
     return Mesh(
         vertices=np.vstack([m.vertices for m in meshes]).astype(np.float32),
-        faces=np.vstack([m.faces + o for m, o in zip(meshes, offsets)]).astype(
-            np.int64
-        ),
+        faces=np.vstack(
+            [m.faces + o for m, o in zip(meshes, offsets, strict=True)]
+        ).astype(np.int64),
     )
 
 
@@ -138,7 +140,7 @@ def heightmap_to_mesh(
         [np.column_stack([a, d, e]), np.column_stack([a, e, b])], axis=0
     )
 
-    # --- bottom: fan from a centre vertex over copies of the perimeter ----
+    # --- bottom: fan from a center vertex over copies of the perimeter ----
     perim = _perimeter_indices(rows, cols)
     n_top = top.shape[0]
     n_p = perim.shape[0]
@@ -163,6 +165,227 @@ def heightmap_to_mesh(
     return Mesh(vertices=vertices, faces=faces)
 
 
+def frame_mesh(
+    width_mm: float, depth_mm: float, frame_mm: float, height_mm: float
+) -> Mesh:
+    """A closed rectangular ring around the ``width_mm`` x ``depth_mm`` block.
+
+    The ring's inner walls lie on the block's walls, so the two touch without
+    overlapping. It stands from z=0 to ``height_mm``.
+
+    :param width_mm: block width (X).
+    :param depth_mm: block depth (Y).
+    :param frame_mm: ring width, outward from the block.
+    :param height_mm: ring height.
+    :return: the ring as one closed, outward-wound solid.
+    """
+    if frame_mm <= 0 or height_mm <= 0:
+        raise ValueError("frame width and height must be positive")
+    f = frame_mm
+    # outer and inner corners, counter-clockwise from the south-west
+    outer = [
+        (-f, -f),
+        (width_mm + f, -f),
+        (width_mm + f, depth_mm + f),
+        (-f, depth_mm + f),
+    ]
+    inner = [(0.0, 0.0), (width_mm, 0.0), (width_mm, depth_mm), (0.0, depth_mm)]
+    ring = outer + inner  # 0-3 outer, 4-7 inner
+    vertices = np.array(
+        [(x, y, height_mm) for x, y in ring] + [(x, y, 0.0) for x, y in ring],
+        np.float32,
+    )
+    lo = 8  # bottom copy of vertex i is i + 8
+    faces = []
+    for i in range(4):
+        j = (i + 1) % 4
+        o0, o1, n0, n1 = i, j, 4 + i, 4 + j
+        # top: the quad between an outer and an inner edge, counter-clockwise;
+        # the bottom is the same quad reversed
+        faces += [(o0, o1, n1), (o0, n1, n0)]
+        faces += [(o0 + lo, n1 + lo, o1 + lo), (o0 + lo, n0 + lo, n1 + lo)]
+        # outer wall faces out; the inner wall faces the block
+        faces += [(o0 + lo, o1 + lo, o1), (o0 + lo, o1, o0)]
+        faces += [(n1 + lo, n0 + lo, n0), (n1 + lo, n0, n1)]
+    return Mesh(vertices=vertices, faces=np.array(faces, np.int64))
+
+
+def heightmap_split_solids(
+    relief_mm: np.ndarray,
+    width_mm: float,
+    depth_mm: float,
+    base_mm: float,
+    cell_mask: np.ndarray,
+) -> tuple[Mesh, Mesh]:
+    """Split the :func:`heightmap_to_mesh` block into two closed solids.
+
+    Each grid cell is a column from the floor to the terrain; the cells where
+    ``cell_mask`` is True form the first solid and the rest the second. The
+    two meet in vertical walls along the mask boundary, so together they fill
+    the same block. ``cell_mask`` must have no 2x2 checkerboards (see
+    ``water._fix_diagonals``), or the solids touch along a single edge.
+
+    :param relief_mm: (rows, cols) heights above the base top, row 0 north.
+    :param width_mm: block width.
+    :param depth_mm: block depth.
+    :param base_mm: base thickness under the lowest terrain point.
+    :param cell_mask: (rows-1, cols-1) booleans, one per grid cell.
+    :return: (masked solid, unmasked solid); either may have no faces.
+    """
+    relief = np.asarray(relief_mm, dtype=np.float64)
+    if np.min(relief) < 0:  # match heightmap_to_mesh
+        relief = relief - np.min(relief)
+    rows, cols = relief.shape
+    if cell_mask.shape != (rows - 1, cols - 1):
+        raise ValueError("cell_mask must be (rows-1, cols-1)")
+    xs = np.linspace(0.0, width_mm, cols)
+    ys = np.linspace(depth_mm, 0.0, rows)
+    gx, gy = np.meshgrid(xs, ys)
+    n = rows * cols
+    top = np.column_stack([gx.ravel(), gy.ravel(), (relief + base_mm).ravel()])
+    bottom = top.copy()
+    bottom[:, 2] = 0.0
+    vertices = np.vstack([top, bottom])
+
+    r = np.arange(rows - 1)[:, None]
+    c = np.arange(cols - 1)[None, :]
+    a = (r * cols + c).ravel()
+    b, d = a + 1, a + cols
+    e = d + 1
+
+    def solid(cells: np.ndarray) -> Mesh:
+        if not cells.any():
+            return Mesh(np.zeros((0, 3), np.float32), np.zeros((0, 3), np.int64))
+        ca, cb, cd, ce = a[cells], b[cells], d[cells], e[cells]
+        tops = np.concatenate(
+            [np.column_stack([ca, cd, ce]), np.column_stack([ca, ce, cb])]
+        )
+        floors = tops[:, ::-1] + n
+        # Boundary edges are the directed top edges whose reverse is absent;
+        # each gets a wall facing out of the region, as the block's walls do.
+        u = tops.ravel()
+        v = np.roll(tops, -1, axis=1).ravel()
+        fwd = u * (2 * n) + v
+        rev = v * (2 * n) + u
+        edge = ~np.isin(fwd, rev)
+        u, v = u[edge], v[edge]
+        walls = np.concatenate(
+            [np.column_stack([u + n, v + n, v]), np.column_stack([u + n, v, u])]
+        )
+        faces = np.vstack([tops, walls, floors])
+        used, remap = np.unique(faces, return_inverse=True)
+        return Mesh(
+            vertices=vertices[used].astype(np.float32),
+            faces=remap.reshape(faces.shape).astype(np.int64),
+        )
+
+    mask = cell_mask.ravel()
+    return solid(mask), solid(~mask)
+
+
+def write_3mf(
+    parts: list[tuple[str, Mesh, str]],
+    name: str = "satprint",
+    attribution: str | None = None,
+) -> bytes:
+    """Serialize ``parts`` as one 3MF object made of named, colored parts.
+
+    Slicers (Bambu Studio, OrcaSlicer, PrusaSlicer) open it as one object
+    with one part per entry, so each part can take its own filament. A
+    Bambu-style ``Metadata/model_settings.config`` names the parts and puts
+    part *n* on filament *n*, which Bambu Studio reads; other slicers ignore
+    it. The colors are display hints only.
+
+    :param parts: (part name, mesh in mm, ``#RRGGBB`` color); empty meshes
+        are skipped.
+    :param name: object name.
+    :param attribution: data credits, stored as the 3MF ``Copyright``.
+    :return: the 3MF file contents.
+    """
+    from xml.sax.saxutils import escape, quoteattr
+
+    parts = [p for p in parts if p[1].faces.shape[0]]
+    if not parts:
+        raise ValueError("no parts with faces to write")
+    out = [
+        '<?xml version="1.0" encoding="UTF-8"?>\n',
+        '<model unit="millimeter" xml:lang="en-US" '
+        'xmlns="http://schemas.microsoft.com/3dmanufacturing/core/2015/02">\n',
+        f'<metadata name="Title">{escape(name)}</metadata>\n',
+        '<metadata name="Application">satprint</metadata>\n',
+    ]
+    if attribution:
+        out.append(f'<metadata name="Copyright">{escape(attribution)}</metadata>\n')
+    out.append('<resources>\n<basematerials id="1">\n')
+    for part_name, _, color in parts:
+        out.append(
+            f"<base name={quoteattr(part_name)} displaycolor={quoteattr(color)}/>\n"
+        )
+    out.append("</basematerials>\n")
+    for i, (part_name, mesh, _) in enumerate(parts):
+        out.append(
+            f'<object id="{i + 2}" type="model" name={quoteattr(part_name)} '
+            f'pid="1" pindex="{i}">\n<mesh>\n<vertices>\n'
+        )
+        v = mesh.vertices.astype(np.float64)
+        out.append(
+            "".join(f'<vertex x="{x:.4f}" y="{y:.4f}" z="{z:.4f}"/>\n' for x, y, z in v)
+        )
+        out.append("</vertices>\n<triangles>\n")
+        out.append(
+            "".join(
+                f'<triangle v1="{p}" v2="{q}" v3="{r}"/>\n'
+                for p, q, r in mesh.faces.tolist()
+            )
+        )
+        out.append("</triangles>\n</mesh>\n</object>\n")
+    parent = len(parts) + 2
+    out.append(
+        f'<object id="{parent}" type="model" name={quoteattr(name)}>\n<components>\n'
+    )
+    out.extend(f'<component objectid="{i + 2}"/>\n' for i in range(len(parts)))
+    out.append("</components>\n</object>\n</resources>\n")
+    out.append(f'<build>\n<item objectid="{parent}"/>\n</build>\n</model>\n')
+
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
+        z.writestr(
+            "[Content_Types].xml",
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">'
+            '<Default Extension="rels" '
+            'ContentType="application/vnd.openxmlformats-package.relationships+xml"/>'
+            '<Default Extension="model" '
+            'ContentType="application/vnd.ms-package.3dmanufacturing-3dmodel+xml"/>'
+            "</Types>",
+        )
+        z.writestr(
+            "_rels/.rels",
+            '<?xml version="1.0" encoding="UTF-8"?>\n'
+            '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+            '<Relationship Target="/3D/3dmodel.model" Id="rel0" '
+            'Type="http://schemas.microsoft.com/3dmanufacturing/2013/01/3dmodel"/>'
+            "</Relationships>",
+        )
+        z.writestr("3D/3dmodel.model", "".join(out))
+        cfg = [
+            '<?xml version="1.0" encoding="UTF-8"?>\n<config>\n',
+            f'  <object id="{parent}">\n'
+            f'    <metadata key="name" value={quoteattr(name)}/>\n'
+            '    <metadata key="extruder" value="1"/>\n',
+        ]
+        for i, (part_name, _, _) in enumerate(parts):
+            cfg.append(
+                f'    <part id="{i + 2}" subtype="normal_part">\n'
+                f'      <metadata key="name" value={quoteattr(part_name)}/>\n'
+                f'      <metadata key="extruder" value="{i + 1}"/>\n'
+                "    </part>\n"
+            )
+        cfg.append("  </object>\n</config>\n")
+        z.writestr("Metadata/model_settings.config", "".join(cfg))
+    return buf.getvalue()
+
+
 _STL_DTYPE = np.dtype([("normal", "<f4", (3,)), ("v", "<f4", (3, 3)), ("attr", "<u2")])
 
 
@@ -177,7 +400,7 @@ def write_binary_stl(
 def write_binary_stl(
     mesh: Mesh, target: str | io.IOBase | None = None, name: str = "satprint"
 ) -> bytes | None:
-    """Serialise ``mesh`` as binary STL. Returns bytes when ``target`` is None."""
+    """Serialize ``mesh`` as binary STL. Returns bytes when ``target`` is None."""
     tri = mesh.vertices[mesh.faces].astype(np.float32)
     normals = np.cross(tri[:, 1] - tri[:, 0], tri[:, 2] - tri[:, 0])
     lengths = np.linalg.norm(normals, axis=1, keepdims=True)
@@ -245,7 +468,7 @@ def write_glb(
     copyright: str | None = None,
     buildings: BuildingMesh | None = None,
 ) -> bytes:
-    """Serialise a :func:`heightmap_to_mesh` block as GLB with ``texture``
+    """Serialize a :func:`heightmap_to_mesh` block as GLB with ``texture``
     draped over the top surface.
 
     The top surface is the first ``rows * cols`` vertices and the first
@@ -253,7 +476,7 @@ def write_glb(
     Grid node (r, c) gets texture coordinates (c / (cols-1), r / (rows-1)),
     so the image must cover the same area with row 0 at the north edge. The
     walls and base are a second primitive in a plain material. Output is in
-    metres, Y up, as glTF requires.
+    meters, Y up, as glTF requires.
 
     :param mesh: block from :func:`heightmap_to_mesh`.
     :param rows: heightmap rows used to build ``mesh``.
@@ -263,7 +486,7 @@ def write_glb(
     :param name: mesh and node name.
     :param copyright: data attribution, stored in ``asset.copyright``.
     :param buildings: optional building solids. Their roofs take the same
-        texture, mapped by plan position; walls and floors are plain grey.
+        texture, mapped by plan position; walls and floors are plain gray.
     :return: the GLB file contents.
     """
     n_top = rows * cols
@@ -445,7 +668,7 @@ def write_glb(
             },
             {
                 "name": "base",
-                # Linear-space #d9c9a8, the colour of the STL preview.
+                # Linear-space #d9c9a8, the color of the STL preview.
                 "pbrMetallicRoughness": {
                     "baseColorFactor": [0.693, 0.584, 0.392, 1.0],
                     "metallicFactor": 0.0,

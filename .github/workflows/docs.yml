@@ -1,0 +1,80 @@
+# Build the docs/*.md guides and the mkdocstrings API reference into a
+# GitHub Pages site.
+#
+# Runs on every push to main that touches the docs or the package source, so
+# the API reference never drifts from the docstrings, and on demand.
+
+name: Docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/**'
+      - 'satprint/**'
+      - 'mkdocs.yml'
+      - '.github/workflows/docs.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One Pages deployment at a time; let an in-progress deploy finish.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build site (mkdocs)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+
+      - name: Cache virtualenv
+        uses: actions/cache@v6
+        with:
+          path: .venv
+          key: docs-${{ runner.os }}-${{ hashFiles('poetry.lock') }}
+
+      # mkdocstrings imports satprint to read its docstrings.
+      - name: Install dependencies
+        run: poetry install --no-interaction --with docs
+
+      # --strict: the site builds with no warnings today, so any new one is a
+      # broken link or docstring and should fail the deploy.
+      - name: Build
+        run: poetry run mkdocs build --strict
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v6
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: site
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@v5

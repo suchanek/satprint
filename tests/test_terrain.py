@@ -116,7 +116,7 @@ def test_fetch_terrarium_mosaic_matches_bbox():
     assert len(set(f.calls)) == hm.meta["tiles"]
     # the surface rises eastwards: east column higher than west column
     assert hm.data[:, -1].mean() > hm.data[:, 0].mean()
-    # ... and the value matches the analytic function at the bbox centre
+    # ... and the value matches the analytic function at the bbox center
     z = hm.meta["zoom"]
     px, py = lonlat_to_global_px(bbox.mid_lon, bbox.mid_lat, z)
     expected = 1000 + px / (256 * 2**z) * 3000 + py / (256 * 2**z) * 500

@@ -33,6 +33,11 @@
   <!-- ───────── 1. Area ───────── -->
   <section class="panel" id="panel-area">
     <h2><span class="step">1</span> Choose an area</h2>
+    <form id="search-form" class="search" role="search" onsubmit="return false">
+      <input type="search" id="search-q" placeholder="Search a place: city, landmark, mountain, address" aria-label="Search a place" minlength="2" maxlength="200">
+      <button id="btn-search" type="submit">Search</button>
+      <ul id="search-results" class="search-results" hidden></ul>
+    </form>
     <div class="toolbar">
       <button id="btn-draw" class="primary" type="button">Draw rectangle</button>
       <select id="presets"><option value="">Presets…</option></select>
@@ -77,6 +82,16 @@
         <input type="range" id="smoothing" min="0" max="8" step="0.5" value="0">
         <output id="smoothing-out">0</output></label>
       <label class="switch"><input type="checkbox" id="clamp" checked> Flatten sea / below-sea-level areas</label>
+      <label class="switch"><input type="checkbox" id="texture" checked> Drape satellite imagery (GLB, satellite elevation only)</label>
+      <label class="switch"><input type="checkbox" id="buildings"> Add buildings from OpenStreetMap (areas up to 40 km²)</label>
+      <label>Building height <span class="unit">×, 1 = true proportion</span>
+        <input type="number" id="building_scale" min="0.25" max="20" step="0.25" value="1"></label>
+      <label>Building data
+        <select id="building_source">
+          <option value="auto" selected>OpenFreeMap, Overpass if that fails</option>
+          <option value="openfreemap">OpenFreeMap only (fast, rebuilt weekly)</option>
+          <option value="overpass">Overpass only (latest OSM edits, slower)</option>
+        </select></label>
       <label>Model name <input type="text" id="name" value="terrain" maxlength="60"></label>
       <div class="source-row">
         <span>Source:</span>
@@ -85,6 +100,7 @@
         <label><input type="radio" name="source" value="upload" id="source-upload" disabled> Uploaded file</label>
       </div>
       <button id="btn-generate" class="primary big" type="button">Generate model</button>
+      <progress id="progress" hidden aria-label="model build progress"></progress>
       <p class="hint" id="status" aria-live="polite"></p>
     </form>
   </section>
@@ -98,6 +114,7 @@
         <img id="hillshade" alt="hillshade preview" hidden>
         <dl id="stats"></dl>
         <a id="btn-download" class="primary big" download hidden>Download STL</a>
+        <a id="btn-download-glb" class="secondary big" download hidden>Download textured GLB</a>
         <p class="hint">Tip: for FDM printers keep relief ≥ 1 mm and width ≤ your bed size. Resin printers love 1024-column grids.</p>
       </aside>
     </div>
@@ -106,7 +123,8 @@
 
 <footer>
   Elevation: <a href="https://registry.opendata.aws/terrain-tiles/" target="_blank" rel="noopener">AWS Terrain Tiles</a>
-  (SRTM, ASTER GDEM, GMTED, ETOPO1, and others) · Imagery © Esri &amp; contributors · Base map © OpenStreetMap contributors
+  (SRTM, ASTER GDEM, GMTED, ETOPO1, and others) · Imagery © Esri &amp; contributors ·
+  Base map, buildings and search © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>
 </footer>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"

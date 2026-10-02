@@ -16,6 +16,8 @@ dependencies = [
   "fastapi>=0.110",
   "uvicorn[standard]>=0.27",
   "python-multipart>=0.0.9",
+  "shapely>=2.1",
+  "mapbox-vector-tile>=2.0",
 ]
 
 [project.optional-dependencies]

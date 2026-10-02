@@ -5,6 +5,8 @@ Sources
 * ``fetch_terrarium`` — satellite-derived global elevation (SRTM/ASTER/GMTED
   merged) from the AWS Open Data "Terrain Tiles" set, in Mapzen *terrarium*
   PNG encoding. No API key is required.
+* ``fetch_imagery`` -- Esri World Imagery tiles for the same bbox, used as
+  the texture on the GLB export.
 * ``synthetic_heightmap`` — procedural mountains for offline use and tests.
 * ``load_heightmap_file`` — user-supplied PNG / TIFF / GeoTIFF heightmaps.
 """
@@ -15,7 +17,8 @@ import hashlib
 import io
 import math
 import os
-from concurrent.futures import ThreadPoolExecutor
+from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 
 import numpy as np
@@ -25,12 +28,21 @@ from PIL import Image
 TERRARIUM_URL = (
     "https://s3.amazonaws.com/elevation-tiles-prod/terrarium/{z}/{x}/{y}.png"
 )
+IMAGERY_URL = (
+    "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/"
+    "MapServer/tile/{z}/{y}/{x}"
+)
+IMAGERY_ATTRIBUTION = "Imagery (c) Esri, Maxar, Earthstar Geographics"
 TILE_SIZE = 256
 MAX_ZOOM = 14  # terrarium tiles exist to z15; z14 (~10 m/px) is plenty
+MAX_IMAGERY_ZOOM = 18
 MAX_TILES = 64  # guard against accidental multi-gigabyte requests
 EARTH_RADIUS_M = 6_371_008.8
 
 Image.MAX_IMAGE_PIXELS = 50_000_000
+
+# progress(stage, done, total): called as long-running steps advance.
+Progress = Callable[[str, int, int], None]
 
 
 @dataclass(frozen=True)
@@ -107,14 +119,79 @@ def lonlat_to_global_px(lon: float, lat: float, zoom: int) -> tuple[float, float
     return x, y
 
 
-def choose_zoom(bbox: BBox, target_cols: int) -> int:
+def choose_zoom(bbox: BBox, target_cols: int, max_zoom: int = MAX_ZOOM) -> int:
     """Smallest zoom at which the bbox spans at least ``target_cols`` pixels."""
-    for z in range(0, MAX_ZOOM + 1):
+    for z in range(0, max_zoom + 1):
         x0, _ = lonlat_to_global_px(bbox.west, bbox.north, z)
         x1, _ = lonlat_to_global_px(bbox.east, bbox.south, z)
         if x1 - x0 >= target_cols:
             return z
-    return MAX_ZOOM
+    return max_zoom
+
+
+def _tile_range(bbox: BBox, zoom: int) -> tuple[int, int, int, int]:
+    """Inclusive tile index range (tx0, ty0, tx1, ty1) covering ``bbox``."""
+    x0, y0 = lonlat_to_global_px(bbox.west, bbox.north, zoom)
+    x1, y1 = lonlat_to_global_px(bbox.east, bbox.south, zoom)
+    tx0, ty0 = int(x0 // TILE_SIZE), int(y0 // TILE_SIZE)
+    tx1, ty1 = int(math.ceil(x1 / TILE_SIZE)) - 1, int(math.ceil(y1 / TILE_SIZE)) - 1
+    return tx0, ty0, tx1, ty1
+
+
+def _tile_count(bbox: BBox, zoom: int) -> int:
+    tx0, ty0, tx1, ty1 = _tile_range(bbox, zoom)
+    return (tx1 - tx0 + 1) * (ty1 - ty0 + 1)
+
+
+def _mosaic(
+    bbox: BBox,
+    zoom: int,
+    fetch,
+    workers: int = 8,
+    progress: Progress | None = None,
+    stage: str = "tiles",
+) -> tuple[np.ndarray, int]:
+    """Fetch, mosaic and crop the tiles covering ``bbox`` at ``zoom``.
+
+    ``fetch(z, x, y)`` returns one tile as a (256, 256, ...) array. Returns
+    the crop, row 0 north, and the number of tiles used. ``progress`` is
+    called as ``progress(stage, done, total)`` as tiles arrive.
+    """
+    tx0, ty0, tx1, ty1 = _tile_range(bbox, zoom)
+    n_tiles = (tx1 - tx0 + 1) * (ty1 - ty0 + 1)
+    if n_tiles > MAX_TILES:
+        raise ValueError(
+            f"area needs {n_tiles} tiles at zoom {zoom}; lower the resolution or shrink the area"
+        )
+
+    coords = [(tx, ty) for ty in range(ty0, ty1 + 1) for tx in range(tx0, tx1 + 1)]
+    tiles: list = [None] * len(coords)
+    if progress:
+        progress(stage, 0, len(coords))
+    with ThreadPoolExecutor(max_workers=min(workers, len(coords))) as pool:
+        futures = {
+            pool.submit(fetch, zoom, tx, ty): i for i, (tx, ty) in enumerate(coords)
+        }
+        for done, fut in enumerate(as_completed(futures), 1):
+            tiles[futures[fut]] = fut.result()
+            if progress:
+                progress(stage, done, len(coords))
+
+    mosaic = np.empty(
+        ((ty1 - ty0 + 1) * TILE_SIZE, (tx1 - tx0 + 1) * TILE_SIZE) + tiles[0].shape[2:],
+        dtype=tiles[0].dtype,
+    )
+    for (tx, ty), tile in zip(coords, tiles):
+        r, c = (ty - ty0) * TILE_SIZE, (tx - tx0) * TILE_SIZE
+        mosaic[r : r + TILE_SIZE, c : c + TILE_SIZE] = tile
+
+    # Crop to the exact bbox in pixel space.
+    x0, y0 = lonlat_to_global_px(bbox.west, bbox.north, zoom)
+    x1, y1 = lonlat_to_global_px(bbox.east, bbox.south, zoom)
+    cx0, cy0 = x0 - tx0 * TILE_SIZE, y0 - ty0 * TILE_SIZE
+    cx1, cy1 = x1 - tx0 * TILE_SIZE, y1 - ty0 * TILE_SIZE
+    crop = mosaic[int(cy0) : int(math.ceil(cy1)), int(cx0) : int(math.ceil(cx1))]
+    return crop, n_tiles
 
 
 # ----------------------------------------------------------------------------
@@ -144,6 +221,8 @@ def encode_terrarium(elev: np.ndarray) -> bytes:
 class TileFetcher:
     """Fetch + disk-cache terrarium tiles."""
 
+    ext = "png"
+
     def __init__(
         self,
         cache_dir: str | None = None,
@@ -155,14 +234,14 @@ class TileFetcher:
             os.path.expanduser("~"), ".cache", "satprint", "tiles"
         )
         self.session = session or requests.Session()
-        self.session.headers.setdefault(
-            "User-Agent", "satprint/0.1 (+terrain relief models)"
-        )
+        # Assign, not setdefault: a Session already carries python-requests'
+        # own User-Agent, which some tile servers refuse.
+        self.session.headers["User-Agent"] = "satprint/0.1 (+terrain relief models)"
         self.url_template = url_template
         self.timeout = timeout
 
     def _cache_path(self, z, x, y) -> str:
-        return os.path.join(self.cache_dir, str(z), str(x), f"{y}.png")
+        return os.path.join(self.cache_dir, str(z), str(x), f"{y}.{self.ext}")
 
     def fetch_bytes(self, z: int, x: int, y: int) -> bytes:
         path = self._cache_path(z, x, y)
@@ -185,11 +264,37 @@ class TileFetcher:
         return decode_terrarium(self.fetch_bytes(z, x, y))
 
 
+class ImageryFetcher(TileFetcher):
+    """Fetch + disk-cache satellite imagery tiles as (256, 256, 3) uint8 RGB."""
+
+    ext = "jpg"
+
+    def __init__(
+        self,
+        cache_dir: str | None = None,
+        session: requests.Session | None = None,
+        url_template: str = IMAGERY_URL,
+        timeout: float = 30.0,
+    ):
+        super().__init__(
+            cache_dir
+            or os.path.join(os.path.expanduser("~"), ".cache", "satprint", "imagery"),
+            session,
+            url_template,
+            timeout,
+        )
+
+    def fetch(self, z: int, x: int, y: int) -> np.ndarray:
+        img = Image.open(io.BytesIO(self.fetch_bytes(z, x, y))).convert("RGB")
+        return np.asarray(img, dtype=np.uint8)
+
+
 def fetch_terrarium(
     bbox: BBox,
     target_cols: int = 256,
     fetcher: TileFetcher | None = None,
     workers: int = 8,
+    progress: Progress | None = None,
 ) -> Heightmap:
     """Download, mosaic and crop terrain tiles covering ``bbox``.
 
@@ -198,31 +303,7 @@ def fetch_terrarium(
     """
     fetcher = fetcher or TileFetcher()
     zoom = choose_zoom(bbox, target_cols)
-    x0, y0 = lonlat_to_global_px(bbox.west, bbox.north, zoom)
-    x1, y1 = lonlat_to_global_px(bbox.east, bbox.south, zoom)
-    tx0, ty0 = int(x0 // TILE_SIZE), int(y0 // TILE_SIZE)
-    tx1, ty1 = int(math.ceil(x1 / TILE_SIZE)) - 1, int(math.ceil(y1 / TILE_SIZE)) - 1
-    n_tiles = (tx1 - tx0 + 1) * (ty1 - ty0 + 1)
-    if n_tiles > MAX_TILES:
-        raise ValueError(
-            f"area needs {n_tiles} tiles at zoom {zoom}; lower the resolution or shrink the area"
-        )
-
-    coords = [(tx, ty) for ty in range(ty0, ty1 + 1) for tx in range(tx0, tx1 + 1)]
-    with ThreadPoolExecutor(max_workers=min(workers, len(coords))) as pool:
-        tiles = list(pool.map(lambda c: fetcher.fetch(zoom, c[0], c[1]), coords))
-
-    mosaic = np.empty(
-        ((ty1 - ty0 + 1) * TILE_SIZE, (tx1 - tx0 + 1) * TILE_SIZE), dtype=np.float32
-    )
-    for (tx, ty), tile in zip(coords, tiles):
-        r, c = (ty - ty0) * TILE_SIZE, (tx - tx0) * TILE_SIZE
-        mosaic[r : r + TILE_SIZE, c : c + TILE_SIZE] = tile
-
-    # Crop to the exact bbox in pixel space.
-    cx0, cy0 = x0 - tx0 * TILE_SIZE, y0 - ty0 * TILE_SIZE
-    cx1, cy1 = x1 - tx0 * TILE_SIZE, y1 - ty0 * TILE_SIZE
-    crop = mosaic[int(cy0) : int(math.ceil(cy1)), int(cx0) : int(math.ceil(cx1))]
+    crop, n_tiles = _mosaic(bbox, zoom, fetcher.fetch, workers, progress, "elevation")
 
     gw, gh = bbox.ground_size_m()
     rows = max(2, int(round(target_cols * gh / gw)))
@@ -235,6 +316,33 @@ def fetch_terrarium(
         bbox=bbox,
         meta={"zoom": zoom, "tiles": n_tiles, "native_px": list(crop.shape)},
     )
+
+
+def fetch_imagery(
+    bbox: BBox,
+    max_px: int = 2048,
+    fetcher: ImageryFetcher | None = None,
+    workers: int = 8,
+    progress: Progress | None = None,
+) -> tuple[Image.Image, dict]:
+    """Satellite image of ``bbox``, cropped exactly like :func:`fetch_terrarium`.
+
+    The zoom is the smallest that reaches ``max_px`` columns, lowered until
+    the area fits in ``MAX_TILES``. The image is downscaled so its longer
+    side is at most ``max_px``. Row 0 is north, so grid node (r, c) of the
+    heightmap sits at texture coordinates (c / (cols-1), r / (rows-1)).
+    """
+    fetcher = fetcher or ImageryFetcher()
+    zoom = choose_zoom(bbox, max_px, max_zoom=MAX_IMAGERY_ZOOM)
+    while zoom > 0 and _tile_count(bbox, zoom) > MAX_TILES:
+        zoom -= 1
+    crop, n_tiles = _mosaic(bbox, zoom, fetcher.fetch, workers, progress, "imagery")
+    img = Image.fromarray(np.ascontiguousarray(crop), "RGB")
+    if max(img.size) > max_px:
+        scale = max_px / max(img.size)
+        size = (max(1, round(img.width * scale)), max(1, round(img.height * scale)))
+        img = img.resize(size, Image.Resampling.LANCZOS)
+    return img, {"zoom": zoom, "tiles": n_tiles, "px": [img.height, img.width]}
 
 
 # ----------------------------------------------------------------------------

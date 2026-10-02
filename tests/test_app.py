@@ -4,21 +4,137 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
+from shapely import box
 
 from satprint.app import create_app
-from satprint.mesh import read_binary_stl
-from tests.test_terrain import FakeFetcher
+from satprint.mesh import read_binary_stl, read_glb
+from satprint.osm import Geocoder, OverpassClient, VectorTileClient
+from tests.test_buildings import encode_tile
+from tests.test_terrain import FakeFetcher, FakeImageryFetcher
+
+
+import time
+
+
+class FakeOverpass(OverpassClient):
+    """Two buildings near the centre of whatever bbox is asked for."""
+
+    def __init__(self, fail=False):
+        super().__init__(cache_dir="/nonexistent")
+        self.fail = fail
+        self.calls = 0
+
+    def buildings(self, bbox, progress=None):
+        self.calls += 1
+        if progress:
+            progress("buildings", 1, 1)
+        if self.fail:
+            raise RuntimeError("all Overpass servers failed: 429")
+        lat, lon = bbox.mid_lat, bbox.mid_lon
+        d = (bbox.north - bbox.south) / 20
+
+        def square(la, lo):
+            pts = [(la, lo), (la, lo + d), (la + d, lo + d), (la + d, lo), (la, lo)]
+            return [{"lat": a, "lon": o} for a, o in pts]
+
+        return {
+            "elements": [
+                {
+                    "type": "way",
+                    "tags": {"building": "yes", "height": "300"},
+                    "geometry": square(lat, lon),
+                },
+                {
+                    "type": "way",
+                    "tags": {"building": "yes"},
+                    "geometry": square(lat - 2 * d, lon - 2 * d),
+                },
+            ]
+        }
+
+
+class FakeVectorTiles(VectorTileClient):
+    """One vector tile with one building at its centre, or a failure."""
+
+    def __init__(self, fail=False):
+        super().__init__(cache_dir="/nonexistent")
+        self.fail = fail
+        self.calls = 0
+
+    def tiles(self, bbox, progress=None, zoom=14):
+        self.calls += 1
+        if self.fail:
+            raise RuntimeError("tiles.openfreemap.org unreachable")
+        from satprint.terrain import _tile_range
+
+        tx0, ty0, tx1, ty1 = _tile_range(bbox, zoom)
+        out = []
+        for ty in range(ty0, ty1 + 1):
+            for tx in range(tx0, tx1 + 1):
+                # one block over the whole tile, so any area gets a building
+                feats = [
+                    {
+                        "geometry": box(0, 0, 4096, 4096),
+                        "properties": {"render_height": 120},
+                    }
+                ]
+                out.append((zoom, tx, ty, encode_tile(feats)))
+        if progress:
+            progress("buildings", len(out), len(out))
+        return out
+
+
+class FakeGeocoder(Geocoder):
+    def __init__(self):
+        super().__init__()
+        self.min_interval_s = 0
+
+    def _fetch(self, q, limit):
+        if q == "boom":
+            raise ConnectionError("nominatim down")
+        return [
+            {
+                "display_name": f"{q}, Somewhere",
+                "lat": "46.0",
+                "lon": "7.6",
+                "boundingbox": ["45.9", "46.1", "7.5", "7.7"],
+                "category": "place",
+                "type": "city",
+            }
+        ]
+
+
+def make_client(**kw):
+    deps = {
+        "tile_fetcher": FakeFetcher(),
+        "imagery_fetcher": FakeImageryFetcher(),
+        "overpass": FakeOverpass(),
+        "geocoder": FakeGeocoder(),
+        # unreachable by default, so "auto" falls back to the Overpass fake
+        "vector_tiles": FakeVectorTiles(fail=True),
+    }
+    deps.update(kw)
+    return TestClient(create_app(**deps))
 
 
 @pytest.fixture
 def client():
-    return TestClient(create_app(tile_fetcher=FakeFetcher()))
+    return make_client()
 
 
 def test_index_and_presets(client):
     assert "satprint" in client.get("/").text
     presets = client.get("/api/presets").json()
-    assert presets and all(len(p["bbox"]) == 4 for p in presets)
+    assert len(presets) >= 50 and all(len(p["bbox"]) == 4 for p in presets)
+    for p in presets:
+        s, w, n, e = p["bbox"]
+        assert -85 < s < n < 85 and -180 <= w < e <= 180, p["name"]
+    groups = {p["group"] for p in presets}
+    assert len(groups) == 2
+    assert any(p["buildings"] for p in presets) and not all(
+        p["buildings"] for p in presets
+    )
+    assert len({p["name"] for p in presets}) == len(presets)
     assert client.get("/static/app.js").status_code == 200
 
 
@@ -108,3 +224,181 @@ def test_upload_flow(client):
     )
     r = client.post("/api/upload", files={"file": ("x.png", b"not a png", "image/png")})
     assert r.status_code == 400
+
+
+def test_terrarium_model_has_textured_glb(client):
+    r = client.post(
+        "/api/model",
+        json={
+            "source": "terrarium",
+            "resolution": 64,
+            "bbox": {"south": 45.8, "west": 7.4, "north": 45.9, "east": 7.6},
+            "name": "alps",
+        },
+    )
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["info"]["textured"] is True and j["glb_url"].endswith("/alps.glb")
+    glb = client.get(j["glb_url"])
+    assert glb.headers["content-type"] == "model/gltf-binary"
+    assert "alps.glb" in glb.headers["content-disposition"]
+    doc, _ = read_glb(glb.content)
+    assert "Esri" in doc["asset"]["copyright"]
+    assert len(glb.content) == j["info"]["glb_bytes"]
+
+
+def test_texture_off_and_synthetic_have_no_glb(client):
+    bbox = {"south": 45.8, "west": 7.4, "north": 45.9, "east": 7.6}
+    r = client.post(
+        "/api/model",
+        json={"source": "terrarium", "resolution": 64, "bbox": bbox, "texture": False},
+    )
+    assert r.status_code == 200 and r.json()["glb_url"] is None
+    r = client.post("/api/model", json={"source": "synthetic", "resolution": 64})
+    assert r.status_code == 200 and r.json()["glb_url"] is None
+    assert r.json()["info"]["textured"] is False
+
+
+def test_imagery_failure_still_returns_stl():
+    client = make_client(imagery_fetcher=FakeImageryFetcher(fail=True))
+    r = client.post(
+        "/api/model",
+        json={
+            "source": "terrarium",
+            "resolution": 64,
+            # a bbox no other test uses, so the imagery cache cannot answer
+            "bbox": {"south": 10.0, "west": 20.0, "north": 10.1, "east": 20.1},
+        },
+    )
+    assert r.status_code == 200, r.text
+    j = r.json()
+    assert j["glb_url"] is None
+    assert "unreachable" in j["info"]["texture_error"]
+    assert client.get(j["stl_url"]).status_code == 200
+
+
+CITY = {"south": 40.70, "west": -74.02, "north": 40.72, "east": -74.00}
+
+
+def test_buildings_are_added_to_stl_and_glb(client):
+    base = {"source": "terrarium", "resolution": 64, "bbox": CITY, "width_mm": 100}
+    plain = client.post("/api/model", json=base).json()
+    r = client.post("/api/model", json={**base, "buildings": True, "name": "city"})
+    assert r.status_code == 200, r.text
+    j = r.json()
+    info = j["info"]
+    assert info["buildings"] == 2 and "OpenStreetMap" in info["building_attribution"]
+    assert info["triangles"] > plain["info"]["triangles"]
+    # the 300 m building at true proportion sets the model height
+    assert info["height_mm"] > plain["info"]["height_mm"]
+    tri = read_binary_stl(client.get(j["stl_url"]).content)
+    assert tri.shape[0] == info["triangles"]
+    assert tri[..., 2].max() == pytest.approx(info["height_mm"], abs=1e-3)
+    doc, _ = read_glb(client.get(j["glb_url"]).content)
+    assert len(doc["meshes"][0]["primitives"]) == 4
+    assert "OpenStreetMap" in doc["asset"]["copyright"]
+
+
+def test_building_problems_do_not_fail_the_model():
+    client = make_client(overpass=FakeOverpass(fail=True))
+    r = client.post(
+        "/api/model",
+        json={
+            "source": "terrarium",
+            "resolution": 64,
+            "bbox": {"south": 41.0, "west": -74.0, "north": 41.01, "east": -73.99},
+            "buildings": True,
+        },
+    )
+    assert r.status_code == 200, r.text
+    assert "429" in r.json()["info"]["building_error"]
+
+    overpass = FakeOverpass()
+    client = make_client(overpass=overpass)
+    big = {"south": 45.0, "west": 7.0, "north": 45.2, "east": 7.3}  # ~500 km2
+    r = client.post(
+        "/api/model",
+        json={"source": "terrarium", "resolution": 64, "bbox": big, "buildings": True},
+    )
+    assert r.status_code == 200
+    assert "limited to 40 km2" in r.json()["info"]["building_error"]
+    assert overpass.calls == 0
+
+
+def test_search(client):
+    r = client.get("/api/search", params={"q": "Zermatt"})
+    assert r.status_code == 200
+    (hit,) = r.json()
+    assert hit["name"] == "Zermatt" and hit["bbox"] == [45.9, 7.5, 46.1, 7.7]
+    assert client.get("/api/search", params={"q": "x"}).status_code == 422
+    assert client.get("/api/search", params={"q": "boom"}).status_code == 502
+
+
+def _wait(client, job_id):
+    for _ in range(200):
+        j = client.get(f"/api/jobs/{job_id}").json()
+        if j["status"] != "running":
+            return j
+        time.sleep(0.02)
+    raise AssertionError("job did not finish")
+
+
+def test_background_job_reports_stages_and_result(client):
+    body = {"source": "terrarium", "resolution": 64, "bbox": CITY, "buildings": True}
+    r = client.post("/api/jobs", json=body)
+    assert r.status_code == 200
+    j = _wait(client, r.json()["job_id"])
+    assert j["status"] == "done", j
+    res = j["result"]
+    assert res["info"]["buildings"] == 2
+    assert client.get(res["stl_url"]).status_code == 200
+    assert client.get("/api/jobs/nope").status_code == 404
+
+
+def test_background_job_reports_errors(client):
+    j = _wait(
+        client, client.post("/api/jobs", json={"source": "terrarium"}).json()["job_id"]
+    )
+    assert j["status"] == "error" and j["status_code"] == 400
+    assert "bbox is required" in j["error"]
+    assert client.post("/api/jobs", json={"width_mm": 1}).status_code == 422
+
+
+def test_openfreemap_is_preferred_and_named():
+    vt = FakeVectorTiles()
+    overpass = FakeOverpass()
+    client = make_client(vector_tiles=vt, overpass=overpass)
+    body = {
+        "source": "terrarium",
+        "resolution": 64,
+        "bbox": {"south": 40.75, "west": -73.99, "north": 40.76, "east": -73.98},
+        "buildings": True,
+    }
+    info = client.post("/api/model", json=body).json()["info"]
+    assert info["building_source"] == "openfreemap" and info["buildings"] >= 1
+    assert overpass.calls == 0
+
+    body["bbox"] = {"south": 40.76, "west": -73.99, "north": 40.77, "east": -73.98}
+    info = client.post(
+        "/api/model", json={**body, "building_source": "overpass"}
+    ).json()["info"]
+    assert info["building_source"] == "overpass" and overpass.calls == 1
+
+
+def test_auto_falls_back_to_overpass_and_reports_both_failures():
+    client = make_client()  # vector tiles fail by default
+    body = {
+        "source": "terrarium",
+        "resolution": 64,
+        "bbox": {"south": 40.77, "west": -73.99, "north": 40.78, "east": -73.98},
+        "buildings": True,
+    }
+    info = client.post("/api/model", json=body).json()["info"]
+    assert info["building_source"] == "overpass"
+
+    client = make_client(overpass=FakeOverpass(fail=True))
+    body["bbox"] = {"south": 40.78, "west": -73.99, "north": 40.79, "east": -73.98}
+    err = client.post("/api/model", json=body).json()["info"]["building_error"]
+    assert (
+        "openfreemap: tiles.openfreemap.org unreachable" in err and "overpass:" in err
+    )

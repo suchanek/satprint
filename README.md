@@ -36,6 +36,17 @@ Mount Fuji from real elevation tiles, 120 mm wide, 1.2× exaggeration:
 * **Guaranteed watertight** — every edge shared by exactly two outward-wound
   triangles; the bottom is a fan so there are no T-junctions. Slicers
   (PrusaSlicer, Cura, Bambu Studio, Chitubox) load it without repair.
+* **Buildings** -- OpenStreetMap footprints and heights, from OpenFreeMap
+  vector tiles (fast, no key) with the Overpass API as a fallback, extruded onto the
+  terrain as closed solids in both the STL and the GLB. Landmark towers keep
+  their setbacks where OSM maps them as `building:part` shapes. Heights are in
+  true proportion by default, with a multiplier for stubby small-scale prints.
+* **Search and presets** -- search any place by name (OpenStreetMap
+  Nominatim), or pick one of 67 presets: 37 cities and landmarks, which turn
+  buildings on, and 30 mountains and landscapes.
+* **Textured GLB** -- satellite imagery of the same area draped over the
+  terrain, for viewing in Blender, macOS Quick Look or a web viewer. The
+  preview shows the GLB when there is one. Satellite-elevation source only.
 * **CLI + REST API** for batch work; interactive API docs at `/docs`.
 
 ## Install
@@ -49,8 +60,8 @@ pip install -e ".[dev]"          # add ",geotiff" for GeoTIFF support (rasterio)
 ## Run the web app
 
 ```bash
-satprint serve                   # http://127.0.0.1:8000
-# or: python -m satprint serve --host 0.0.0.0 --port 8000
+satprint serve                   # http://127.0.0.1:7417
+# or: python -m satprint serve --host 0.0.0.0 --port 7417
 ```
 
 1. **Choose an area** — click *Draw rectangle* and drag on the map, pick a
@@ -72,6 +83,13 @@ satprint build --bbox 45.93 7.58 46.02 7.72 --width 120 --exaggeration 2 -o matt
 satprint build --bbox 36.02 -112.25 36.20 -111.95 --relief 15 --smoothing 1 \
                --preview canyon.png -o grand-canyon.stl
 
+# Midtown Manhattan with buildings, plus a textured GLB
+satprint build --bbox 40.7414 -73.9997 40.7684 -73.9683 --width 150 \
+               --buildings --glb midtown.glb -o midtown.stl
+
+# Also write a GLB with satellite imagery draped over the terrain
+satprint build --bbox 45.93 7.58 46.02 7.72 --width 120 --glb matterhorn.glb -o matterhorn.stl
+
 # From your own DEM (metres), 12 km across in the real world
 satprint build --file dem.tif --ground-width 12000 -o dem.stl
 
@@ -86,14 +104,18 @@ JSON summary (elevation range, scale, triangle count, volume, watertight check).
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/presets` | Named example areas |
+| `GET` | `/api/presets` | Named example areas, grouped |
+| `GET` | `/api/search?q=...` | Place search; each hit has a `bbox` |
 | `POST` | `/api/upload` | Multipart heightmap upload → `upload_id` |
 | `POST` | `/api/model` | Build a model; returns stats, preview PNG and download URLs |
+| `POST` | `/api/jobs` | Same body as `/api/model`, built in the background; returns `job_id` |
+| `GET` | `/api/jobs/{id}` | Job `status`, current `stage` with `done`/`total`, and the `/api/model` response as `result` when done |
 | `GET` | `/api/model/{id}/{name}.stl` | Binary STL |
+| `GET` | `/api/model/{id}/{name}.glb` | Textured GLB, when `glb_url` is set |
 | `GET` | `/api/model/{id}/heightmap.png` | Hillshade preview |
 
 ```bash
-curl -s localhost:8000/api/model -H 'content-type: application/json' -d '{
+curl -s localhost:7417/api/model -H 'content-type: application/json' -d '{
   "source": "terrarium",
   "bbox": {"south": 35.28, "west": 138.65, "north": 35.45, "east": 138.82},
   "width_mm": 150, "exaggeration": 1.2, "resolution": 512, "name": "fuji"
@@ -115,8 +137,11 @@ curl -s localhost:8000/api/model -H 'content-type: application/json' -d '{
 
 ```
 satprint/
-  terrain.py   elevation sources (terrarium tiles, synthetic, file), scaling, hillshade
-  mesh.py      heightmap → watertight solid, binary STL writer/reader, manifold check
+  terrain.py   elevation sources (terrarium tiles, synthetic, file), imagery tiles, scaling, hillshade
+  mesh.py      heightmap → watertight solid, binary STL writer/reader, GLB writer, manifold check
+  buildings.py OSM buildings -> closed solids on the terrain
+  osm.py       Overpass (buildings) and Nominatim (search) clients
+  presets.py   named example areas
   app.py       FastAPI backend (+ in-memory LRU of built models)
   cli.py       `satprint serve` / `satprint build`
   static/      front end: index.html, style.css, app.js (Leaflet + three.js from CDN)
@@ -135,14 +160,38 @@ pytest -q
   available; small areas (< 2 km) will look blocky — use smoothing.
 * Tile downloads are capped at 64 tiles per request to keep the server
   responsive; shrink the area or lower the resolution if you hit the cap.
+* Buildings come from OpenStreetMap, so coverage and height data vary by
+  city. A building with no `height` or `building:levels` tag gets 8 m.
+  Building parts are extruded from the ground (`min_height` is ignored) so
+  nothing floats. Each building is its own closed solid sunk 0.3 mm into the
+  terrain; slicers merge the overlap. Areas are limited to 40 km² with
+  buildings on, and very small footprints are dropped.
+* Buildings come from [OpenFreeMap](https://openfreemap.org) vector tiles by
+  default: zoom-14 tiles from a CDN, cached in `~/.cache/satprint/vtiles`,
+  rebuilt from OSM about weekly. A building crossing a tile edge arrives as
+  two solids that meet at the edge. Choose Overpass ("Building data" in the
+  UI, `--building-source overpass` on the CLI) for the latest OSM edits; the
+  default "auto" uses Overpass only if OpenFreeMap fails.
+* Search uses the public Nominatim service. Overpass buildings download in 0.01° tiles (about 1 km) on a fixed global grid,
+  two at a time, and each tile is cached in `~/.cache/satprint/osm/tiles`.
+  Overlapping areas share tiles, and when Overpass is overloaded and some
+  tiles fail, the rest stay cached, so generating again fetches only the
+  missing ones. Busy answers are retried with backoff; a server that times
+  out is skipped for 10 minutes. Searches are limited to one per second, as
+  the Nominatim usage policy asks.
+* The GLB texture is Esri World Imagery, at most 2048 px on its longer side
+  and capped at 64 tiles like the elevation. The GLB is for viewing; FDM
+  slicers ignore textures, so print the STL. Esri's terms of use govern the
+  imagery. Set `"texture": false` to skip it.
 * Built models live in memory (last 32); the download link is valid until the
   server restarts.
 * Data: Terrain Tiles © Mapzen/AWS Open Data (SRTM, ASTER GDEM, GMTED2010,
-  ETOPO1, NED, EU-DEM …). Imagery © Esri. Street map © OpenStreetMap.
+  ETOPO1, NED, EU-DEM …). Imagery © Esri. Street map, buildings and search
+  © OpenStreetMap contributors (ODbL).
 
 ## Docker
 
 ```bash
 docker build -t satprint .
-docker run -p 8000:8000 -v satprint-tiles:/root/.cache/satprint satprint
+docker run -p 7417:7417 -v satprint-tiles:/root/.cache/satprint satprint
 ```

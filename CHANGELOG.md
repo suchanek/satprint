@@ -6,6 +6,8 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-02
+
 ### Added
 
 - **Zenodo DOI**: the concept DOI `10.5281/zenodo.23094151`, which resolves to
@@ -14,7 +16,6 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Docker Hub image**: `egsuchanek/satprint`, built for `linux/amd64` and
   `linux/arm64`. The install docs now start from `docker run` on that image.
 - **Container healthcheck** on `/api/health`, and a `.dockerignore`.
-
 - **Roof shapes**: roofs tagged `roof:shape` dome, onion, cone or pyramidal
   are built with that shape, with the height from `roof:height` or
   `roof:levels`. Lanterns, cupolas and statues mapped on a dome stand in a
@@ -34,6 +35,8 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   the tile cache volume now mounts at `/home/satprint/.cache/satprint` instead
   of `/root/.cache/satprint`. Remove a volume made by the old image before
   reusing it.
+- **Building attribution** in the 3MF and GLB follows the building source
+  used, so Overture builds credit Overture Maps.
 
 ## [0.1.0] - 2026-10-02
 

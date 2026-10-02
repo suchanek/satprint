@@ -1,43 +1,53 @@
-# Release Notes -- v0.1.0
+# Release Notes -- v0.2.0
 
 > Released: 2026-10-02
 
-The first release. satprint turns real satellite elevation data into a solid
-relief model scaled to your printer, from a place you pick on a map. One build
-gives three files: a watertight STL for a one-color print, a multi-color 3MF
-that a multi-material printer prints in up to four filaments, and a GLB with
-satellite imagery draped over the terrain for viewing.
+Buildings now have real shapes. Domes, onion domes, cones and pyramids mapped
+in OpenStreetMap print with their roofs instead of as flat-topped blocks, and a
+few landmarks that roof tags cannot describe get exact shapes, starting with
+the Sphere in Las Vegas. Overture Maps joins OpenFreeMap and Overpass as a
+building source, and a published Docker image runs the whole app with one
+command.
 
 ## What changed
 
-**Terrain you can print.** Elevation comes from the public AWS Terrain Tiles
-set with no API key. The model is a closed block, terrain on top, four walls
-and a flat base, at true plan scale with vertical exaggeration or a fixed relief
-height. Every edge is shared by exactly two outward-wound triangles, so slicers
-load the STL without repair.
+**Roof shapes.** A building tagged `roof:shape` dome, onion, cone or pyramidal
+gets that roof, sized from `roof:height` or `roof:levels`, or from the
+footprint when neither is tagged. OpenFreeMap's vector tiles carry no roof
+tags, so satprint fetches just the shaped buildings in the area from Overpass
+and swaps them in. If that lookup fails, the build finishes with flat roofs and
+says so. Lanterns, cupolas and statues mapped on top of a dome stand in a hole
+cut in it, so the US Capitol prints with its stepped drum, dome and lantern,
+and every solid still only touches its neighbors along shared walls, which
+keeps the STL watertight.
 
-**Cities with their buildings.** OpenStreetMap footprints and heights become
-closed solids standing on the terrain, read from OpenFreeMap's vector tiles,
-with the Overpass API as a fallback. Towers mapped as building parts keep their
-setbacks, and overlapping footprints are merged so no two solids pass through
-each other. Midtown Manhattan comes to about 10,000 buildings and builds in
-about 6 seconds.
+**Landmarks.** Some buildings cannot be described by roof tags at all. The
+Sphere in Las Vegas used to print as a cylinder; it is now a 157 m sphere cut
+off by the ground at 112 m, bulging slightly past its base as the real one
+does. The list lives in `satprint/landmarks.py` and matches buildings by their
+Wikidata or OSM ID, so it works with every building source.
 
-**Four colors.** The multi-color 3MF splits the model into land, water,
-buildings and an optional border frame, as named parts of one object. Water is
-the sea, rivers and lakes from OpenStreetMap. Bambu Studio opens the file with
-the parts already on filaments 1 to 4.
+**Overture Maps.** Overture merges OpenStreetMap with Microsoft and Google
+building footprints, so it finds buildings OSM is missing, and it keeps the
+roof tags. Pick it as "Building data" in the web app, `--building-source
+overture` on the CLI, or `"building_source": "overture"` in the REST API. It
+reads only the files Overture's index lists for the area, which takes a few
+seconds, and caches the result per Overture release.
 
-**A web app, a CLI and an API.** `satprint serve` runs a map with place search,
-67 presets, a 3D preview of the textured model and a progress bar for each
-build. `satprint build` does the same from the command line, and the REST API
-behind the web app is open for scripting.
+**Docker image.** `egsuchanek/satprint` runs on both Intel and ARM machines.
+It runs as an unprivileged user, reports its health to Docker, and includes
+the Overture source.
 
 ## Upgrading
 
-Nothing to upgrade from. Install with `poetry install` or `pip install -e .`
-from a clone, on Python 3.12 or 3.13, and run `satprint serve`. The
-documentation is at https://suchanek.github.io/satprint/.
+Nothing changes for existing builds except that tagged roofs now have shapes.
+To use Overture from a pip or Poetry install, add the new extra:
+`pip install "satprint[overture]"`, which brings pyarrow, about 190 MB.
+
+If you ran an earlier Docker image, its cache volume belongs to root and the
+new image cannot write to it. Remove it with `docker volume rm satprint-tiles`
+and let it be recreated; the cache now mounts at
+`/home/satprint/.cache/satprint`.
 
 ---
 

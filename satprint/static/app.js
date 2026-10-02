@@ -49,14 +49,19 @@ function groundSize(b) {
   const h = R * (b.north - b.south) * rad;
   return [w, h];
 }
+const MAX_BUILDING_KM2 = 40;   // matches MAX_BUILDING_AREA_KM2 on the server
 function updateAreaHint() {
   const b = bboxFromInputs();
   const [w, h] = groundSize(b);
   if (!(w > 0 && h > 0)) { $("area-hint").textContent = "Invalid area."; return; }
   const km = (m) => (m / 1000).toFixed(1);
   const width = +$("width_mm").value || 100;
+  const km2 = w * h / 1e6;
+  const tooBig = $("buildings").checked && km2 > MAX_BUILDING_KM2;
   $("area-hint").textContent =
-    `Area ≈ ${km(w)} × ${km(h)} km  →  model ${fmt(width, 0)} × ${fmt(width * h / w, 0)} mm  (plan scale 1:${fmt(w / width * 1000, 0)})`;
+    `Area ≈ ${km(w)} × ${km(h)} km  →  model ${fmt(width, 0)} × ${fmt(width * h / w, 0)} mm  (plan scale 1:${fmt(w / width * 1000, 0)})` +
+    (tooBig ? `  ·  too large for buildings (${fmt(km2, 0)} km², limit ${MAX_BUILDING_KM2})` : "");
+  $("area-hint").className = "hint" + (tooBig ? " error" : "");
 }
 ["south", "west", "north", "east"].forEach((id) => $(id).addEventListener("change", () => setBBox(bboxFromInputs(), { fit: true })));
 $("width_mm").addEventListener("input", updateAreaHint);
@@ -84,21 +89,92 @@ if (map) map.on("mouseup", (e) => {
   document.querySelector('input[name=source][value=terrarium]').checked = true;
 });
 
-// presets
+// presets, grouped; each suggests whether to add buildings
+const slug = (s) => s.split(",")[0].toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "terrain";
 fetch("/api/presets").then((r) => r.json()).then((presets) => {
+  const groups = new Map();
   for (const p of presets) {
+    if (!groups.has(p.group)) {
+      const g = document.createElement("optgroup"); g.label = p.group;
+      groups.set(p.group, g); $("presets").appendChild(g);
+    }
     const o = document.createElement("option");
-    o.value = JSON.stringify(p.bbox); o.textContent = p.name;
-    $("presets").appendChild(o);
+    o.value = JSON.stringify(p); o.textContent = p.name;
+    groups.get(p.group).appendChild(o);
   }
 });
 $("presets").addEventListener("change", (e) => {
   if (!e.target.value) return;
-  const [south, west, north, east] = JSON.parse(e.target.value);
+  const p = JSON.parse(e.target.value);
+  const [south, west, north, east] = p.bbox;
+  $("buildings").checked = p.buildings;
   setBBox({ south, west, north, east }, { fit: true });
-  $("name").value = e.target.selectedOptions[0].textContent.split(",")[0].toLowerCase().replace(/\s+/g, "-");
+  $("name").value = slug(p.name);
   document.querySelector('input[name=source][value=terrarium]').checked = true;
 });
+$("buildings").addEventListener("change", updateAreaHint);
+
+// place search (Nominatim, through the server)
+function squareAround(lat, lon, km) {
+  const dlat = km / 2 / 111.32, dlon = km / 2 / (111.32 * Math.cos(lat * Math.PI / 180));
+  return { south: lat - dlat, west: lon - dlon, north: lat + dlat, east: lon + dlon };
+}
+// Always a square around the place, so a long thin feature (a bridge, a
+// river) does not become a long thin model. Nature gets room for the
+// landscape; everything else is clamped to a size where buildings work.
+const NATURAL_TYPES = new Set(["peak", "volcano", "mountain_range", "ridge", "glacier", "valley", "massif", "crater"]);
+function bboxForResult(r) {
+  const [s, w, n, e] = r.bbox;
+  const [wm, hm] = groundSize({ south: s, west: w, north: n, east: e });
+  const km = Math.max(wm, hm) / 1000;
+  // A big extent (Tokyo's includes islands 1000 km out) can be centred at
+  // sea; use the place's own point then, and the extent centre otherwise.
+  const lat = km > 5 ? r.lat : (s + n) / 2, lon = km > 5 ? r.lon : (w + e) / 2;
+  if (r.category === "natural" || NATURAL_TYPES.has(r.type)) return squareAround(lat, lon, Math.min(Math.max(km, 10), 30));
+  return squareAround(lat, lon, Math.min(Math.max(km, 1.5), 5));
+}
+// OSM uses "yes" for an untyped feature, e.g. bridge=yes; show the category then.
+const placeKind = (r) => (r.type && r.type !== "yes" ? r.type : r.category).replace(/_/g, " ");
+const results = $("search-results");
+function closeResults() { results.hidden = true; results.innerHTML = ""; }
+function chooseResult(r) {
+  setBBox(bboxForResult(r), { fit: true });
+  $("name").value = slug(r.name);
+  $("search-q").value = r.display_name;
+  document.querySelector('input[name=source][value=terrarium]').checked = true;
+  closeResults();
+}
+$("search-form").addEventListener("submit", async () => {
+  const q = $("search-q").value.trim();
+  if (q.length < 2) return;
+  $("btn-search").disabled = true;
+  results.hidden = false; results.innerHTML = "<li>Searching…</li>";
+  try {
+    const r = await fetch("/api/search?q=" + encodeURIComponent(q));
+    const j = await r.json();
+    if (!r.ok) throw new Error(j.detail || "search failed");
+    if (!j.length) { results.innerHTML = "<li>No places found.</li>"; return; }
+    results.innerHTML = "";
+    for (const item of j) {
+      const li = document.createElement("li");
+      li.tabIndex = 0;
+      const rest = item.display_name.split(",").slice(1).join(",").trim();
+      li.innerHTML = `<strong></strong><small></small>`;
+      li.querySelector("strong").textContent = item.name;
+      li.querySelector("small").textContent = [placeKind(item), rest].filter(Boolean).join(" · ");
+      li.addEventListener("click", () => chooseResult(item));
+      li.addEventListener("keydown", (e) => { if (e.key === "Enter") chooseResult(item); });
+      results.appendChild(li);
+    }
+  } catch (err) {
+    results.innerHTML = "";
+    const li = document.createElement("li"); li.textContent = err.message || String(err); results.appendChild(li);
+  } finally {
+    $("btn-search").disabled = false;
+  }
+});
+document.addEventListener("click", (e) => { if (!$("search-form").contains(e.target)) closeResults(); });
+document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeResults(); });
 setBBox(bboxFromInputs(), { fit: true });
 
 // ───────────────────────── upload ─────────────────────────
@@ -125,15 +201,17 @@ $("smoothing").addEventListener("input", (e) => $("smoothing-out").value = e.tar
 // ───────────────────────── 3D viewer ─────────────────────────
 const viewerEl = $("viewer");
 let viewer = null;          // { THREE, scene, camera, controls, renderer, material, mesh, grid }
+// mesh is either a plain STL Mesh (shared material) or a GLB scene (own materials)
 let viewerPromise = null;
 
 function initViewer() {
   if (viewerPromise) return viewerPromise;
   viewerPromise = (async () => {
-    const [THREE, { OrbitControls }, { STLLoader }] = await Promise.all([
+    const [THREE, { OrbitControls }, { STLLoader }, { GLTFLoader }] = await Promise.all([
       import("three"),
       import("three/addons/controls/OrbitControls.js"),
       import("three/addons/loaders/STLLoader.js"),
+      import("three/addons/loaders/GLTFLoader.js"),
     ]);
     const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
@@ -151,7 +229,7 @@ function initViewer() {
     };
     window.addEventListener("resize", resize); resize();
     (function animate() { requestAnimationFrame(animate); controls.update(); renderer.render(scene, camera); })();
-    viewer = { THREE, STLLoader, scene, camera, controls, renderer, material, mesh: null, grid: null };
+    viewer = { THREE, STLLoader, GLTFLoader, scene, camera, controls, renderer, material, mesh: null, grid: null };
     return viewer;
   })();
   viewerPromise.catch(() => { viewerPromise = null; });
@@ -159,7 +237,23 @@ function initViewer() {
 }
 initViewer().catch(() => {});   // warm up in the background; failure is handled at preview time
 
-async function showSTL(buffer, info) {
+function disposeModel(v) {
+  if (!v.mesh) return;
+  v.scene.remove(v.mesh);
+  v.mesh.traverse((o) => {
+    if (!o.isMesh) return;
+    o.geometry.dispose();
+    if (o.material !== v.material) {
+      o.material.map?.dispose();
+      o.material.dispose();
+    }
+  });
+  v.mesh = null;
+}
+
+// Show the textured GLB when there is one, otherwise the STL.
+// GLB is in metres, Y up; STL is in mm, Z up. Both end up in mm, Y up, centred.
+async function showModel(buffer, info, isGLB) {
   let v;
   try { v = await initViewer(); }
   catch (err) {
@@ -167,14 +261,24 @@ async function showSTL(buffer, info) {
     if (ph) ph.innerHTML = "3D preview unavailable (could not load three.js from the CDN).<br>The STL download still works.";
     return;
   }
-  const { THREE, STLLoader, scene, camera, controls, material } = v;
-  if (v.mesh) { scene.remove(v.mesh); v.mesh.geometry.dispose(); }
+  const { THREE, STLLoader, GLTFLoader, scene, camera, controls, material } = v;
+  disposeModel(v);
   if (v.grid) scene.remove(v.grid);
-  const geom = new STLLoader().parse(buffer);
-  geom.computeVertexNormals();
-  geom.rotateX(-Math.PI / 2);       // STL is Z-up; three.js is Y-up
-  geom.center();
-  v.mesh = new THREE.Mesh(geom, material);
+  if (isGLB) {
+    const gltf = await new GLTFLoader().parseAsync(buffer, "");
+    const model = gltf.scene;
+    model.scale.setScalar(1000);    // metres -> mm, to match the grid and camera
+    model.updateMatrixWorld(true);
+    const centre = new THREE.Box3().setFromObject(model).getCenter(new THREE.Vector3());
+    model.position.sub(centre);
+    v.mesh = model;
+  } else {
+    const geom = new STLLoader().parse(buffer);
+    geom.computeVertexNormals();
+    geom.rotateX(-Math.PI / 2);       // STL is Z-up; three.js is Y-up
+    geom.center();
+    v.mesh = new THREE.Mesh(geom, material);
+  }
   scene.add(v.mesh);
   const size = Math.max(info.width_mm, info.depth_mm);
   v.grid = new THREE.GridHelper(size * 1.6, 16, 0x3a4656, 0x263040);
@@ -186,6 +290,42 @@ async function showSTL(buffer, info) {
 }
 
 // ───────────────────────── generate ─────────────────────────
+// The build runs as a server-side job; poll it and show each stage.
+const STAGE_LABELS = {
+  starting: "Starting",
+  elevation: "Elevation tiles",
+  buildings: "Building data tiles",
+  "building mesh": "Building solids",
+  "terrain mesh": "Terrain mesh",
+  imagery: "Imagery tiles",
+  "writing files": "Writing STL and GLB",
+};
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const errorText = (j) => (typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail));
+function showProgress(job) {
+  const bar = $("progress");
+  bar.hidden = false;
+  if (job.total > 0) { bar.max = job.total; bar.value = job.done; }
+  else bar.removeAttribute("value");   // indeterminate
+  const label = STAGE_LABELS[job.stage] || job.stage;
+  const count = job.total > 0 ? ` ${fmt(job.done, 0)} / ${fmt(job.total, 0)}` : "…";
+  status(`${label}${count}  (${fmt(job.elapsed_s, 0)} s)`);
+}
+async function runJob(body) {
+  const r = await fetch("/api/jobs", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const start = await r.json();
+  if (!r.ok) throw new Error(errorText(start));
+  for (;;) {
+    await sleep(400);
+    const pr = await fetch(`/api/jobs/${start.job_id}`);
+    const job = await pr.json();
+    if (!pr.ok) throw new Error(errorText(job));
+    if (job.status === "done") return job.result;
+    if (job.status === "error") throw new Error(job.error);
+    showProgress(job);
+  }
+}
+
 $("btn-generate").addEventListener("click", async () => {
   const source = document.querySelector("input[name=source]:checked").value;
   const relief = $("relief_mm").value;
@@ -194,14 +334,16 @@ $("btn-generate").addEventListener("click", async () => {
     ground_width_m: $("ground-width").value ? +$("ground-width").value : null,
     resolution: +$("resolution").value, width_mm: +$("width_mm").value, base_mm: +$("base_mm").value,
     exaggeration: +$("exaggeration").value, relief_mm: relief ? +relief : null,
-    smoothing: +$("smoothing").value, clamp_sea_level: $("clamp").checked, name: $("name").value || "terrain",
+    smoothing: +$("smoothing").value, clamp_sea_level: $("clamp").checked, texture: $("texture").checked,
+    buildings: $("buildings").checked, building_scale: +$("building_scale").value || 1,
+    building_source: $("building_source").value,
+    name: $("name").value || "terrain",
   };
   $("btn-generate").disabled = true;
-  status(source === "terrarium" ? "Downloading elevation tiles and building the mesh…" : "Building the mesh…");
+  showProgress({ stage: "starting", done: 0, total: 0, elapsed_s: 0 });
   try {
-    const r = await fetch("/api/model", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    const j = await r.json();
-    if (!r.ok) throw new Error(typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail));
+    const j = await runJob(body);
+    status("Loading the 3D preview…");
     const i = j.info;
     $("hillshade").src = j.preview_png; $("hillshade").hidden = false;
     $("stats").innerHTML = [
@@ -214,17 +356,30 @@ $("btn-generate").addEventListener("click", async () => {
       ["Volume", `${fmt(i.volume_cm3)} cm³`],
       ["Est. PLA", `${fmt(i.est_weight_g_pla_20pct, 0)} g @ 20 % infill · ${fmt(i.est_weight_g_pla_solid, 0)} g solid`],
       ["Source", i.source + (i.source_meta?.zoom != null ? ` (zoom ${i.source_meta.zoom}, ${i.source_meta.tiles} tiles)` : "")],
+      ...(i.buildings != null ? [["Buildings", `${fmt(i.buildings, 0)} (OpenStreetMap via ${i.building_source === "openfreemap" ? "OpenFreeMap" : "Overpass"})`]] : []),
+      ...(i.textured ? [["Texture", `${i.texture_meta.px[1]} × ${i.texture_meta.px[0]} px (zoom ${i.texture_meta.zoom}, ${i.texture_meta.tiles} tiles)`]] : []),
     ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
-    const stl = await fetch(j.stl_url);
-    const buf = await stl.arrayBuffer();
-    await showSTL(buf, i);
+    const previewUrl = j.glb_url || j.stl_url;
+    const buf = await (await fetch(previewUrl)).arrayBuffer();
+    await showModel(buf, i, Boolean(j.glb_url));
     const dl = $("btn-download");
     dl.href = j.stl_url; dl.download = j.stl_url.split("/").pop(); dl.hidden = false;
-    dl.textContent = `Download STL (${fmt(buf.byteLength / 1048576, 1)} MB)`;
-    status(`Done in ${i.generate_seconds}s.`, "ok");
+    dl.textContent = `Download STL (${fmt(i.stl_bytes / 1048576, 1)} MB)`;
+    const glb = $("btn-download-glb");
+    glb.hidden = !j.glb_url;
+    if (j.glb_url) {
+      glb.href = j.glb_url; glb.download = j.glb_url.split("/").pop();
+      glb.textContent = `Download textured GLB (${fmt(i.glb_bytes / 1048576, 1)} MB)`;
+    }
+    const problems = [
+      i.texture_error && `No texture: ${i.texture_error}`,
+      i.building_error && `No buildings: ${i.building_error}`,
+    ].filter(Boolean);
+    status(`Done in ${i.generate_seconds}s.` + (problems.length ? " " + problems.join(" ") : ""), problems.length ? "error" : "ok");
   } catch (err) {
     status(err.message || String(err), "error");
   } finally {
     $("btn-generate").disabled = false;
+    $("progress").hidden = true;
   }
 });

@@ -1,28 +1,43 @@
-"""FastAPI backend: terrain lookup, model generation, STL download."""
+"""FastAPI backend: terrain lookup, model generation, STL and GLB download."""
 
 from __future__ import annotations
 
 import base64
+import io
 import os
 import threading
 import time
 import uuid
 from collections import OrderedDict
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, Optional
 
-from fastapi import FastAPI, File, HTTPException, UploadFile
+from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import __version__
-from .mesh import Mesh, heightmap_to_mesh, write_binary_stl
+from .buildings import (
+    MAX_BUILDING_AREA_KM2,
+    BuildingMesh,
+    bbox_area_km2,
+    building_mesh,
+    buildings_from_osm,
+    buildings_from_vector_tiles,
+)
+from .mesh import Mesh, heightmap_to_mesh, merge_meshes, write_binary_stl, write_glb
+from .osm import OSM_ATTRIBUTION, Geocoder, OverpassClient, VectorTileClient
+from .presets import presets as all_presets
 from .terrain import (
+    IMAGERY_ATTRIBUTION,
     BBox,
     Heightmap,
+    ImageryFetcher,
     PrintParams,
+    Progress,
     TileFetcher,
+    fetch_imagery,
     fetch_terrarium,
     heightmap_png,
     load_heightmap_file,
@@ -32,15 +47,7 @@ from .terrain import (
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
-PRESETS = [
-    {"name": "Matterhorn, Switzerland", "bbox": [45.93, 7.58, 46.02, 7.72]},
-    {"name": "Grand Canyon, USA", "bbox": [36.02, -112.25, 36.20, -111.95]},
-    {"name": "Mount Fuji, Japan", "bbox": [35.28, 138.65, 35.45, 138.82]},
-    {"name": "Yosemite Valley, USA", "bbox": [37.68, -119.70, 37.78, -119.50]},
-    {"name": "Mount Rainier, USA", "bbox": [46.78, -121.88, 46.93, -121.63]},
-    {"name": "Santorini, Greece", "bbox": [36.33, 25.33, 36.48, 25.50]},
-    {"name": "Lake Bled, Slovenia", "bbox": [46.33, 14.05, 46.40, 14.15]},
-]
+PRESETS = all_presets()
 
 # ----------------------------------------------------------------------------
 # In-memory stores with a small LRU cap
@@ -72,9 +79,41 @@ class StoredModel:
     png: bytes
     info: dict
     created: float
+    glb: bytes | None = None
 
 
+@dataclass
+class Job:
+    """A background model build and how far it has got."""
+
+    id: str
+    status: str = "running"  # running | done | error
+    stage: str = "starting"
+    done: int = 0
+    total: int = 0  # 0 while a stage has no count
+    started: float = field(default_factory=time.time)
+    result: dict | None = None
+    error: str | None = None
+    status_code: int | None = None
+
+    def as_dict(self) -> dict:
+        return {
+            "job_id": self.id,
+            "status": self.status,
+            "stage": self.stage,
+            "done": self.done,
+            "total": self.total,
+            "elapsed_s": round(time.time() - self.started, 1),
+            "result": self.result,
+            "error": self.error,
+            "status_code": self.status_code,
+        }
+
+
+jobs = _LRU(64)  # job_id -> Job
 terrain_cache = _LRU(32)  # key -> Heightmap   (downloads are the slow part)
+imagery_cache = _LRU(16)  # bbox key -> (JPEG bytes, meta)
+buildings_cache = _LRU(16)  # bbox key -> list[Building]
 upload_store = _LRU(16)  # upload_id -> Heightmap
 model_store = _LRU(32)  # model_id -> StoredModel
 
@@ -106,6 +145,23 @@ class ModelRequest(BaseModel):
     relief_mm: Optional[float] = Field(None, ge=0.2, le=500)
     smoothing: float = Field(0.0, ge=0, le=20)
     clamp_sea_level: bool = True
+    texture: bool = Field(
+        True, description="drape satellite imagery on a GLB (terrarium source only)"
+    )
+    buildings: bool = Field(
+        False, description="add OpenStreetMap buildings (terrarium source only)"
+    )
+    building_scale: float = Field(
+        1.0,
+        ge=0.25,
+        le=20,
+        description="building height multiplier; 1 = true proportion",
+    )
+    building_source: Literal["auto", "openfreemap", "overpass"] = Field(
+        "auto",
+        description="OpenFreeMap vector tiles (fast, rebuilt weekly), Overpass "
+        "(latest OSM edits, slower), or auto: OpenFreeMap, then Overpass",
+    )
     name: str = Field("terrain", max_length=60)
 
 
@@ -113,6 +169,7 @@ class ModelResponse(BaseModel):
     model_id: str
     stl_url: str
     png_url: str
+    glb_url: Optional[str] = None
     info: dict
     preview_png: str  # data URL
 
@@ -122,15 +179,68 @@ class ModelResponse(BaseModel):
 # ----------------------------------------------------------------------------
 
 
-def create_app(tile_fetcher: TileFetcher | None = None) -> FastAPI:
+def create_app(
+    tile_fetcher: TileFetcher | None = None,
+    imagery_fetcher: ImageryFetcher | None = None,
+    overpass: OverpassClient | None = None,
+    geocoder: Geocoder | None = None,
+    vector_tiles: VectorTileClient | None = None,
+) -> FastAPI:
     app = FastAPI(
         title="satprint",
         version=__version__,
         description="Turn satellite elevation data into 3D-printable terrain models.",
     )
     fetcher = tile_fetcher or TileFetcher()
+    imagery = imagery_fetcher or ImageryFetcher()
+    osm = overpass or OverpassClient()
+    vtiles = vector_tiles or VectorTileClient()
+    geo = geocoder or Geocoder()
 
-    def _terrain_for(req: ModelRequest) -> Heightmap:
+    def _bbox_key(bbox: BBox) -> tuple:
+        return tuple(
+            round(v, 5) for v in (bbox.south, bbox.west, bbox.north, bbox.east)
+        )
+
+    def _buildings_for(
+        bbox: BBox, source: str, progress: Progress | None = None
+    ) -> tuple[list, str]:
+        """Buildings in ``bbox`` and the source that supplied them."""
+        order = {"auto": ["openfreemap", "overpass"]}.get(source, [source])
+        errors = []
+        for name in order:
+            key = (name, *_bbox_key(bbox))
+            hit = buildings_cache.get(key)
+            if hit is not None:
+                return hit, name
+            try:
+                if name == "openfreemap":
+                    hit = buildings_from_vector_tiles(
+                        vtiles.tiles(bbox, progress=progress)
+                    )
+                else:
+                    hit = buildings_from_osm(osm.buildings(bbox, progress=progress))
+            except Exception as exc:
+                errors.append(f"{name}: {exc}")
+                continue
+            buildings_cache.put(key, hit)
+            return hit, name
+        raise RuntimeError("; ".join(errors))
+
+    def _texture_for(
+        bbox: BBox, progress: Progress | None = None
+    ) -> tuple[bytes, dict]:
+        key = _bbox_key(bbox)
+        hit = imagery_cache.get(key)
+        if hit is None:
+            img, meta = fetch_imagery(bbox, fetcher=imagery, progress=progress)
+            buf = io.BytesIO()
+            img.save(buf, format="JPEG", quality=90)
+            hit = (buf.getvalue(), meta)
+            imagery_cache.put(key, hit)
+        return hit
+
+    def _terrain_for(req: ModelRequest, progress: Progress | None = None) -> Heightmap:
         if req.source == "synthetic":
             key = ("synthetic", req.seed, req.resolution)
             hm = terrain_cache.get(key)
@@ -175,7 +285,9 @@ def create_app(tile_fetcher: TileFetcher | None = None) -> FastAPI:
         hm = terrain_cache.get(key)
         if hm is None:
             try:
-                hm = fetch_terrarium(bbox, target_cols=req.resolution, fetcher=fetcher)
+                hm = fetch_terrarium(
+                    bbox, target_cols=req.resolution, fetcher=fetcher, progress=progress
+                )
             except ValueError as exc:
                 raise HTTPException(400, str(exc)) from exc
             except LookupError as exc:
@@ -188,6 +300,13 @@ def create_app(tile_fetcher: TileFetcher | None = None) -> FastAPI:
     @app.get("/api/presets")
     def presets():
         return PRESETS
+
+    @app.get("/api/search")
+    def search(q: str = Query(..., min_length=2, max_length=200)):
+        try:
+            return geo.search(q)
+        except Exception as exc:
+            raise HTTPException(502, f"place search failed: {exc}") from exc
 
     @app.get("/api/health")
     def health():
@@ -215,9 +334,9 @@ def create_app(tile_fetcher: TileFetcher | None = None) -> FastAPI:
             "meta": hm.meta,
         }
 
-    @app.post("/api/model", response_model=ModelResponse)
-    def make_model(req: ModelRequest):
-        hm = _terrain_for(req)
+    def _build(req: ModelRequest, progress: Progress | None = None) -> ModelResponse:
+        """Build a model; ``progress`` hears each stage as it advances."""
+        hm = _terrain_for(req, progress)
         try:
             params = PrintParams(
                 width_mm=req.width_mm,
@@ -230,16 +349,84 @@ def create_app(tile_fetcher: TileFetcher | None = None) -> FastAPI:
         except ValueError as exc:
             raise HTTPException(400, str(exc)) from exc
         t0 = time.perf_counter()
+        if progress:
+            progress("terrain mesh", 0, 0)
         relief, info = prepare_relief(hm, params)
         mesh: Mesh = heightmap_to_mesh(
             relief, info["width_mm"], info["depth_mm"], params.base_mm
         )
-        stl = write_binary_stl(mesh, name=req.name)
+        rows, cols = relief.shape
+        bmesh: BuildingMesh | None = None
+        building_info: dict = {}
+        if req.buildings and hm.bbox is not None:
+            area = bbox_area_km2(hm.bbox)
+            # Like the texture, a building failure should not cost the STL.
+            if area > MAX_BUILDING_AREA_KM2:
+                building_info["building_error"] = (
+                    f"area is {area:.0f} km2; buildings are limited to "
+                    f"{MAX_BUILDING_AREA_KM2:.0f} km2"
+                )
+            else:
+                try:
+                    found, used = _buildings_for(hm.bbox, req.building_source, progress)
+                except Exception as exc:
+                    building_info["building_error"] = f"building download failed: {exc}"
+                else:
+                    bmesh = building_mesh(
+                        found,
+                        hm.bbox,
+                        relief,
+                        info["width_mm"],
+                        info["depth_mm"],
+                        params.base_mm,
+                        info["mm_per_m_plan"],
+                        scale=req.building_scale,
+                        progress=progress,
+                    )
+                    building_info = {
+                        "buildings": bmesh.count,
+                        "building_source": used,
+                        "building_attribution": OSM_ATTRIBUTION,
+                    }
+                    if bmesh.count:
+                        top = float(bmesh.vertices[:, 2].max())
+                        info["height_mm"] = max(info["height_mm"], top)
+        if progress:
+            progress("writing files", 0, 0)
+        solid = merge_meshes(mesh, bmesh.as_mesh()) if bmesh and bmesh.count else mesh
+        stl = write_binary_stl(solid, name=req.name)
         png = heightmap_png(hm, params.clamp_sea_level)
-        vol_cm3 = mesh.volume_mm3() / 1000.0
+        glb = None
+        texture_info: dict = {"textured": False}
+        if req.texture and hm.bbox is not None:
+            # A missing texture should not cost the user their STL.
+            try:
+                jpeg, meta = _texture_for(hm.bbox, progress)
+            except Exception as exc:
+                texture_info["texture_error"] = f"imagery download failed: {exc}"
+            else:
+                credits = IMAGERY_ATTRIBUTION
+                if bmesh and bmesh.count:
+                    credits += "; " + OSM_ATTRIBUTION
+                glb = write_glb(
+                    mesh,
+                    rows,
+                    cols,
+                    jpeg,
+                    name=req.name,
+                    copyright=credits,
+                    buildings=bmesh,
+                )
+                texture_info = {
+                    "textured": True,
+                    "texture_meta": meta,
+                    "glb_bytes": len(glb),
+                    "texture_attribution": IMAGERY_ATTRIBUTION,
+                }
+        vol_cm3 = solid.volume_mm3() / 1000.0
         info.update(
             {
-                "triangles": mesh.triangle_count,
+                "triangles": solid.triangle_count,
                 "volume_cm3": vol_cm3,
                 "est_weight_g_pla_solid": vol_cm3 * 1.24,
                 "est_weight_g_pla_20pct": vol_cm3
@@ -251,11 +438,14 @@ def create_app(tile_fetcher: TileFetcher | None = None) -> FastAPI:
                 "ground_width_m": hm.ground_width_m,
                 "ground_height_m": hm.ground_height_m,
                 "generate_seconds": round(time.perf_counter() - t0, 3),
+                **texture_info,
+                **building_info,
             }
         )
         model_id = uuid.uuid4().hex[:12]
         model_store.put(
-            model_id, StoredModel(stl=stl, png=png, info=info, created=time.time())
+            model_id,
+            StoredModel(stl=stl, png=png, info=info, created=time.time(), glb=glb),
         )
         safe = (
             "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in req.name)
@@ -265,9 +455,44 @@ def create_app(tile_fetcher: TileFetcher | None = None) -> FastAPI:
             model_id=model_id,
             stl_url=f"/api/model/{model_id}/{safe}.stl",
             png_url=f"/api/model/{model_id}/heightmap.png",
+            glb_url=f"/api/model/{model_id}/{safe}.glb" if glb else None,
             info=info,
             preview_png="data:image/png;base64," + base64.b64encode(png).decode(),
         )
+
+    @app.post("/api/model", response_model=ModelResponse)
+    def make_model(req: ModelRequest):
+        return _build(req)
+
+    @app.post("/api/jobs")
+    def start_job(req: ModelRequest):
+        """Build a model in the background; poll ``GET /api/jobs/{id}``."""
+        job = Job(id=uuid.uuid4().hex[:12])
+        jobs.put(job.id, job)
+
+        def report(stage: str, done: int, total: int) -> None:
+            job.stage, job.done, job.total = stage, done, total
+
+        def run() -> None:
+            try:
+                job.result = _build(req, report).model_dump()
+                job.status = "done"
+            except HTTPException as exc:
+                job.error, job.status_code = str(exc.detail), exc.status_code
+                job.status = "error"
+            except Exception as exc:
+                job.error, job.status_code = f"model build failed: {exc}", 500
+                job.status = "error"
+
+        threading.Thread(target=run, name=f"job-{job.id}", daemon=True).start()
+        return {"job_id": job.id}
+
+    @app.get("/api/jobs/{job_id}")
+    def job_status(job_id: str):
+        job = jobs.get(job_id)
+        if job is None:
+            raise HTTPException(404, "job not found (server restarted?)")
+        return job.as_dict()
 
     @app.get("/api/model/{model_id}/{filename}")
     def download(model_id: str, filename: str):
@@ -280,6 +505,12 @@ def create_app(tile_fetcher: TileFetcher | None = None) -> FastAPI:
             return Response(
                 m.stl,
                 media_type="model/stl",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+        if filename.endswith(".glb") and m.glb is not None:
+            return Response(
+                m.glb,
+                media_type="model/gltf-binary",
                 headers={"Content-Disposition": f'attachment; filename="{filename}"'},
             )
         if filename == "info.json":

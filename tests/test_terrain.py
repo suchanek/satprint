@@ -5,12 +5,15 @@ import pytest
 from PIL import Image
 
 from satprint.terrain import (
+    MAX_TILES,
     BBox,
+    ImageryFetcher,
     PrintParams,
     TileFetcher,
     choose_zoom,
     decode_terrarium,
     encode_terrarium,
+    fetch_imagery,
     fetch_terrarium,
     gaussian_smooth,
     heightmap_png,
@@ -57,6 +60,50 @@ class FakeFetcher(TileFetcher):
         gy, gx = np.mgrid[0:256, 0:256]
         elev = 1000 + (x * 256 + gx) / n * 3000 + (y * 256 + gy) / n * 500
         return encode_terrarium(elev)
+
+
+class FakeImageryFetcher(ImageryFetcher):
+    """Serves JPEG tiles whose red rises eastwards and green southwards
+    across ``bbox`` (clipped outside it)."""
+
+    def __init__(self, fail: bool = False, bbox: BBox = BBox(45.9, 7.5, 46.1, 7.9)):
+        super().__init__(cache_dir="/nonexistent")
+        self.calls = []
+        self.fail = fail
+        self.bbox = bbox
+
+    def fetch_bytes(self, z, x, y):
+        if self.fail:
+            raise ConnectionError("imagery server unreachable")
+        self.calls.append((z, x, y))
+        x0, y0 = lonlat_to_global_px(self.bbox.west, self.bbox.north, z)
+        x1, y1 = lonlat_to_global_px(self.bbox.east, self.bbox.south, z)
+        gy, gx = np.mgrid[0:256, 0:256]
+        rgb = np.zeros((256, 256, 3), np.uint8)
+        rgb[..., 0] = np.clip((x * 256 + gx - x0) / (x1 - x0), 0, 1) * 255
+        rgb[..., 1] = np.clip((y * 256 + gy - y0) / (y1 - y0), 0, 1) * 255
+        buf = io.BytesIO()
+        Image.fromarray(rgb, "RGB").save(buf, format="JPEG", quality=95)
+        return buf.getvalue()
+
+
+def test_fetch_imagery_crop_matches_bbox():
+    bbox = BBox(45.9, 7.5, 46.1, 7.9)
+    f = FakeImageryFetcher()
+    img, meta = fetch_imagery(bbox, max_px=512, fetcher=f)
+    assert max(img.size) == 512
+    assert meta["tiles"] == len(set(f.calls)) <= MAX_TILES
+    rgb = np.asarray(img, dtype=np.float64)
+    # row 0 is north (smaller global y), column 0 is west
+    assert rgb[:, -1, 0].mean() > rgb[:, 0, 0].mean()
+    assert rgb[-1, :, 1].mean() > rgb[0, :, 1].mean()
+
+
+def test_fetch_imagery_lowers_zoom_to_fit_tile_cap():
+    bbox = BBox(40.0, 0.0, 45.0, 10.0)  # wide area at a high pixel target
+    f = FakeImageryFetcher()
+    _, meta = fetch_imagery(bbox, max_px=8192, fetcher=f)
+    assert meta["tiles"] <= MAX_TILES
 
 
 def test_fetch_terrarium_mosaic_matches_bbox():
@@ -130,3 +177,14 @@ def test_load_png_heightmaps():
     assert hm.meta["assumed_pixel_m"] == 30.0
     png = heightmap_png(hm)
     assert Image.open(io.BytesIO(png)).size == (20, 20)
+
+
+def test_mosaic_reports_progress():
+    seen = []
+    bbox = BBox(45.9, 7.5, 46.1, 7.9)
+    hm = fetch_terrarium(
+        bbox, target_cols=200, fetcher=FakeFetcher(), progress=lambda *a: seen.append(a)
+    )
+    n = hm.meta["tiles"]
+    assert seen[0] == ("elevation", 0, n) and seen[-1] == ("elevation", n, n)
+    assert [d for _, d, _ in seen] == list(range(n + 1))

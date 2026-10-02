@@ -17,8 +17,8 @@ authors:
     affiliation: "Flux-Frontiers"
 version: "0.1.0"
 date-released: "2026-10-02"
-# doi is added once Zenodo has archived a release: the concept DOI, which
-# always resolves to the newest version.
+# The Zenodo concept DOI, which resolves to the newest archived release.
+doi: "10.5281/zenodo.23094151"
 license: MIT
 repository-code: "https://github.com/suchanek/satprint"
 url: "https://suchanek.github.io/satprint/"

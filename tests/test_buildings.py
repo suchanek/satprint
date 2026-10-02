@@ -3,6 +3,7 @@ import gzip
 import mapbox_vector_tile
 import numpy as np
 import pytest
+import shapely
 from shapely import box
 
 from satprint.buildings import (
@@ -11,6 +12,7 @@ from satprint.buildings import (
     building_mesh,
     buildings_from_osm,
     buildings_from_vector_tiles,
+    model_projection,
     parse_height,
     resolve_overlaps,
 )
@@ -278,3 +280,337 @@ def test_overlapping_buildings_mesh_without_overlap():
     # merged by height into two solids that only touch
     assert bm.count == 2
     assert bm.as_mesh().volume_mm3() > 0
+
+
+# ---------------------------------------------------------------------------
+# Roof shapes
+# ---------------------------------------------------------------------------
+
+
+def _octagon(lat, lon, r=0.0005):
+    import math
+
+    pts = [
+        (
+            lat + r * math.sin(2 * math.pi * i / 8),
+            lon + r * math.cos(2 * math.pi * i / 8),
+        )
+        for i in range(8)
+    ]
+    return _geom(*pts, pts[0])
+
+
+def test_parse_roof():
+    from shapely import Polygon
+
+    from satprint.buildings import ROOF_PROFILES, parse_roof, radius_m
+
+    sq = Polygon([(0, 40), (0.001, 40), (0.001, 40.001), (0, 40.001)])
+    assert parse_roof({"roof:shape": "dome", "roof:height": "12 m"}, 50, sq) == (
+        ROOF_PROFILES["dome"],
+        12.0,
+    )
+    assert parse_roof({"roof:shape": "cone", "roof:levels": "2"}, 50, sq)[1] == 6.0
+    # untagged height: the footprint's radius, a hemisphere for a dome
+    assert parse_roof({"roof:shape": "dome"}, 500, sq)[1] == pytest.approx(radius_m(sq))
+    assert parse_roof({"roof:shape": "dome", "roof:height": "80"}, 50, sq)[1] == 50
+    assert parse_roof({"roof:shape": "gabled"}, 50, sq) == ((), 0.0)
+    assert parse_roof({}, 50, sq) == ((), 0.0)
+    for profile in ROOF_PROFILES.values():
+        assert profile[-1] == (0.0, 1.0) or profile[-1][0] < 1e-9
+
+
+@pytest.mark.parametrize("shape", ["dome", "onion", "cone", "pyramidal"])
+def test_shaped_roofs_are_closed_and_peak_at_the_top(shape):
+    data = {
+        "elements": [
+            way(
+                _octagon(40.005, -73.995),
+                building="yes",
+                height="60",
+                **{"roof:shape": shape, "roof:height": "30"},
+            )
+        ]
+    }
+    rows, cols = 20, 20
+    slope = np.tile(np.linspace(0, 4, cols, dtype=np.float32), (rows, 1))
+    relief, width, depth, mm_per_m = _block(rows, cols, slope)
+    bm = building_mesh(
+        buildings_from_osm(data), BBOX, relief, width, depth, 3.0, mm_per_m
+    )
+    assert bm.count == 1
+    assert check_watertight(bm.as_mesh())["watertight"]
+    assert bm.as_mesh().volume_mm3() > 0
+    terrain = heightmap_to_mesh(relief, width, depth, 3.0)
+    assert check_watertight(merge_meshes(terrain, bm.as_mesh()))["watertight"]
+    # one apex vertex, 30 m above the eave
+    z = bm.vertices[:, 2]
+    assert (z == z.max()).sum() == 1
+    assert np.isclose(z, z.max() - 30 * mm_per_m, atol=1e-3).sum() == 8
+    # the roof faces carry the shape: more than a flat octagon's 6 triangles
+    assert bm.roof_faces.shape[0] > 6
+
+
+def test_shaped_roof_wins_over_overlapping_flat_buildings():
+    dome = way(
+        _octagon(40.005, -73.995),
+        building="yes",
+        height="40",
+        **{"roof:shape": "dome"},
+    )
+    # a wide flat podium under the dome, and a lower dome cut by the first
+    podium = way(_square(40.0040, -73.9965, 0.003), building="yes", height="10")
+    cut = way(
+        _octagon(40.0053, -73.9947),
+        building="yes",
+        height="20",
+        **{"roof:shape": "dome"},
+    )
+    relief, width, depth, mm_per_m = _block()
+    found = buildings_from_osm({"elements": [dome, podium, cut]})
+    bm = building_mesh(found, BBOX, relief, width, depth, 3.0, mm_per_m)
+    assert check_watertight(bm.as_mesh())["watertight"]
+    # the podium and the cut dome lose the dome's area, so the volume is
+    # the sum of solids that do not overlap
+    alone = [
+        building_mesh([b], BBOX, relief, width, depth, 3.0, mm_per_m) for b in found
+    ]
+    assert bm.as_mesh().volume_mm3() < sum(a.as_mesh().volume_mm3() for a in alone)
+    # only the tall dome keeps a shaped roof: a single apex
+    z = bm.vertices[:, 2]
+    assert (z == z.max()).sum() == 1
+
+
+def test_non_star_footprint_falls_back_to_flat():
+    ell = _geom(
+        (40.004, -73.996),
+        (40.004, -73.993),
+        (40.0045, -73.993),
+        (40.0045, -73.9955),
+        (40.007, -73.9955),
+        (40.007, -73.996),
+        (40.004, -73.996),
+    )
+    data = {
+        "elements": [
+            way(ell, building="yes", height="30", **{"roof:shape": "pyramidal"})
+        ]
+    }
+    relief, width, depth, mm_per_m = _block()
+    bm = building_mesh(
+        buildings_from_osm(data), BBOX, relief, width, depth, 3.0, mm_per_m
+    )
+    assert check_watertight(bm.as_mesh())["watertight"]
+    # flat at the full height
+    top = bm.vertices[:, 2].max()
+    assert (bm.vertices[:, 2] == top).sum() == 6
+    assert top == pytest.approx(3.0 + 30 * mm_per_m, rel=1e-4)
+
+
+def test_apply_shapes_replaces_copies_only():
+    from satprint.buildings import ROOF_PROFILES, Building, apply_shapes
+
+    plain_copy = Building(box(0, 0, 1, 1), 31)  # tiles round heights up
+    neighbor = Building(box(2, 0, 3, 1), 10)
+    big = Building(box(-5, -5, 5, 5), 5)  # contains the dome but much larger
+    drum = Building(box(-0.1, -0.1, 1.1, 1.1), 20)  # under it, its size
+    dome = Building(box(0.05, 0.05, 0.95, 0.95), 30, profile=ROOF_PROFILES["dome"])
+    out = apply_shapes([plain_copy, neighbor, big, drum], [dome])
+    assert out == [neighbor, big, drum, dome]
+    assert apply_shapes([neighbor], [Building(box(0, 0, 1, 1), 5)]) == [neighbor]
+
+
+# ---------------------------------------------------------------------------
+# Landmarks
+# ---------------------------------------------------------------------------
+
+
+def test_sphere_landmark_is_a_cut_sphere():
+    from satprint.buildings import radius_m
+    from satprint.landmarks import apply_landmarks
+
+    sphere_way = way(
+        _octagon(40.005, -73.995, 0.0008),
+        building="commercial",
+        height="112",
+        wikidata="Q60749353",
+        **{"roof:shape": "dome"},
+    )
+    other = way(_square(40.002, -73.998), building="yes", height="20")
+    found = apply_landmarks(buildings_from_osm({"elements": [sphere_way, other]}))
+    sphere = next(b for b in found if b.wikidata == "Q60749353")
+    assert sphere.height_m == 112 and sphere.roof_height_m == 112
+    # ground circle of a 78.5 m sphere whose center is 33.5 m up
+    assert radius_m(sphere.footprint) == pytest.approx(71.0, abs=0.2)
+    widest = max(s for s, _ in sphere.profile)
+    assert widest * 71.0 == pytest.approx(78.5, abs=0.2)
+    assert sphere.profile[-1][0] < 1e-9 and sphere.profile[-1][1] == pytest.approx(1)
+    assert sum(b.height_m == 20 for b in found) == 1
+
+    rows, cols = 20, 20
+    relief, width, depth, mm_per_m = _block(rows, cols)
+    bm = building_mesh(found, BBOX, relief, width, depth, 3.0, mm_per_m)
+    assert bm.count == 2
+    assert check_watertight(bm.as_mesh())["watertight"]
+    assert bm.vertices[:, 2].max() == pytest.approx(3.0 + 112 * mm_per_m, rel=1e-3)
+
+
+def test_landmark_matches_by_osm_id():
+    from satprint.buildings import Building
+    from satprint.landmarks import apply_landmarks
+
+    b = Building(box(-115.163, 36.121, -115.161, 36.123), 100, osm_id="way/976405284")
+    (sphere,) = apply_landmarks([b])
+    assert sphere.profile and sphere.height_m == 112
+    plain = Building(box(0, 0, 1, 1), 10, osm_id="way/1")
+    assert apply_landmarks([plain]) == [plain]
+
+
+def test_dome_in_a_taller_wing_is_not_a_pit():
+    wing = way(_square(40.0040, -73.9965, 0.003), building="yes", height="30")
+    # a dome whose top is below the wing's roof, and one that rises above it
+    sunk = way(
+        _octagon(40.0050, -73.9955, 0.0002),
+        building="yes",
+        height="25",
+        **{"roof:shape": "dome", "roof:height": "15"},
+    )
+    proud = way(
+        _octagon(40.0058, -73.9943, 0.0002),
+        building="yes",
+        height="45",
+        **{"roof:shape": "dome", "roof:height": "25"},
+    )
+    relief, width, depth, mm_per_m = _block()
+    found = buildings_from_osm({"elements": [wing, sunk, proud]})
+    bm = building_mesh(found, BBOX, relief, width, depth, 3.0, mm_per_m)
+    assert check_watertight(bm.as_mesh())["watertight"]
+    wing_top = 3.0 + 30 * mm_per_m
+    # nothing lower than the wing's roof inside the wing: no pit for the
+    # sunk dome, and the proud dome starts at the wing's roof
+    v = bm.vertices
+    to_model = model_projection(BBOX, width, depth)
+    wing_model = shapely.transform(found[0].footprint, to_model)
+    inside = shapely.contains_xy(wing_model.buffer(-0.01), v[:, 0], v[:, 1])
+    tops = v[inside & (v[:, 2] > 3.0 + 1e-6)]
+    assert tops[:, 2].min() == pytest.approx(wing_top, abs=1e-4)
+    assert v[:, 2].max() == pytest.approx(3.0 + 45 * mm_per_m, rel=1e-4)
+    assert (v[:, 2] == v[:, 2].max()).sum() == 1
+
+
+def test_demoted_dome_is_still_printed():
+    big = way(
+        _octagon(40.005, -73.995),
+        building="yes",
+        height="60",
+        **{"roof:shape": "dome", "roof:height": "30"},
+    )
+    small = way(
+        _octagon(40.0054, -73.9946, 0.0003),
+        building="yes",
+        height="20",
+        **{"roof:shape": "dome", "roof:height": "10"},
+    )
+    relief, width, depth, mm_per_m = _block()
+    found = buildings_from_osm({"elements": [big, small]})
+    both = building_mesh(found, BBOX, relief, width, depth, 3.0, mm_per_m)
+    only_big = building_mesh(found[:1], BBOX, relief, width, depth, 3.0, mm_per_m)
+    assert check_watertight(both.as_mesh())["watertight"]
+    # the small dome's part outside the big one stays, flat
+    assert both.count == 2
+    assert both.as_mesh().volume_mm3() > only_big.as_mesh().volume_mm3()
+
+
+def test_lantern_stands_in_a_hole_in_the_dome():
+    dome = way(
+        _octagon(40.005, -73.995),
+        **{
+            "building:part": "yes",
+            "height": "60",
+            "roof:shape": "dome",
+            "roof:height": "20",
+        },
+    )
+    lantern = way(
+        _octagon(40.005, -73.995, 0.0001),
+        **{"building:part": "yes", "height": "75"},
+    )
+    cupola = way(  # a small dome on the lantern, taller than the big one
+        _octagon(40.005, -73.995, 0.00005),
+        **{"building:part": "yes", "height": "85", "roof:shape": "dome"},
+    )
+    relief, width, depth, mm_per_m = _block()
+    found = buildings_from_osm({"elements": [dome, lantern, cupola]})
+    bm = building_mesh(found, BBOX, relief, width, depth, 3.0, mm_per_m)
+    assert bm.count == 3
+    assert check_watertight(bm.as_mesh())["watertight"]
+    z = bm.vertices[:, 2]
+    # the cupola keeps its dome: a single apex at 85 m
+    assert z.max() == pytest.approx(3.0 + 85 * mm_per_m, rel=1e-4)
+    assert (z == z.max()).sum() == 1  # the main dome is cut, no apex
+    # the main dome is still shaped below its cut: rings between its eave
+    # and the lantern's top
+    eave, top = 3.0 + 40 * mm_per_m, 3.0 + 60 * mm_per_m
+    assert len(np.unique(np.round(z[(z > eave + 1e-3) & (z < top)], 4))) > 5
+    # the solids fill the hole without passing through each other
+    alone = [
+        building_mesh([b], BBOX, relief, width, depth, 3.0, mm_per_m) for b in found[:2]
+    ]
+    v = bm.as_mesh().volume_mm3()
+    assert alone[0].as_mesh().volume_mm3() < v
+    assert v < sum(a.as_mesh().volume_mm3() for a in alone)
+
+
+def test_lantern_below_the_cut_is_left_inside_the_dome():
+    dome = way(
+        _octagon(40.005, -73.995),
+        **{
+            "building:part": "yes",
+            "height": "60",
+            "roof:shape": "dome",
+            "roof:height": "20",
+        },
+    )
+    stub = way(
+        _octagon(40.005, -73.995, 0.0001),
+        **{"building:part": "yes", "height": "45"},  # above the eave only
+    )
+    relief, width, depth, mm_per_m = _block()
+    found = buildings_from_osm({"elements": [dome, stub]})
+    bm = building_mesh(found, BBOX, relief, width, depth, 3.0, mm_per_m)
+    assert bm.count == 1
+    assert check_watertight(bm.as_mesh())["watertight"]
+    z = bm.vertices[:, 2]
+    assert (z == z.max()).sum() == 1
+
+
+def test_small_dome_keeps_its_shape_after_simplification():
+    # a 24-sided dome about 2 mm across: simplifying at 0.05 mm drops
+    # corners and more than 1% of its area, which is not a cut by the edge
+    import math
+
+    r = 0.00012
+    pts = [
+        (
+            40.005 + r * math.sin(2 * math.pi * i / 24),
+            -73.995 + r * math.cos(2 * math.pi * i / 24),
+        )
+        for i in range(24)
+    ]
+    data = {
+        "elements": [
+            way(
+                _geom(*pts, pts[0]),
+                building="yes",
+                height="60",
+                **{"roof:shape": "dome", "roof:height": "12"},
+            )
+        ]
+    }
+    relief, width, depth, mm_per_m = _block()
+    bm = building_mesh(
+        buildings_from_osm(data), BBOX, relief, width, depth, 3.0, mm_per_m
+    )
+    assert check_watertight(bm.as_mesh())["watertight"]
+    z = bm.vertices[:, 2]
+    assert (z == z.max()).sum() == 1

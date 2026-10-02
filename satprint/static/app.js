@@ -360,7 +360,7 @@ $("btn-generate").addEventListener("click", async () => {
       ["Volume", `${fmt(i.volume_cm3)} cm³`],
       ["Est. PLA", `${fmt(i.est_weight_g_pla_20pct, 0)} g @ 20 % infill · ${fmt(i.est_weight_g_pla_solid, 0)} g solid`],
       ["Source", i.source + (i.source_meta?.zoom != null ? ` (zoom ${i.source_meta.zoom}, ${i.source_meta.tiles} tiles)` : "")],
-      ...(i.buildings != null ? [["Buildings", `${fmt(i.buildings, 0)} (OpenStreetMap via ${i.building_source === "openfreemap" ? "OpenFreeMap" : "Overpass"})`]] : []),
+      ...(i.buildings != null ? [["Buildings", `${fmt(i.buildings, 0)} (${{ openfreemap: "OpenStreetMap via OpenFreeMap", overpass: "OpenStreetMap via Overpass", overture: "Overture Maps" }[i.building_source] || i.building_source})`]] : []),
       ...(i.multicolor_parts ? [["Multi-color", `${i.multicolor_parts.join(", ")} (${fmt(i.water_fraction * 100, 0)} % water)`]] : []),
       ...(i.textured ? [["Texture", `${i.texture_meta.px[1]} × ${i.texture_meta.px[0]} px (zoom ${i.texture_meta.zoom}, ${i.texture_meta.tiles} tiles)`]] : []),
     ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
@@ -386,6 +386,7 @@ $("btn-generate").addEventListener("click", async () => {
       i.water_error && `No rivers or lakes: ${i.water_error}`,
       i.texture_error && `No texture: ${i.texture_error}`,
       i.building_error && `No buildings: ${i.building_error}`,
+      i.building_warning && `Buildings: ${i.building_warning}`,
     ].filter(Boolean);
     status(`Done in ${i.generate_seconds}s.` + (problems.length ? " " + problems.join(" ") : ""), problems.length ? "error" : "ok");
   } catch (err) {

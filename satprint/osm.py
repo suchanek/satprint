@@ -21,6 +21,14 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 
 import requests
 
+from .buildings import (
+    ROOF_PROFILES,
+    Building,
+    apply_shapes,
+    buildings_from_osm,
+    buildings_from_vector_tiles,
+)
+from .landmarks import LANDMARKS, apply_landmarks
 from .terrain import BBox, Progress, _tile_range
 
 USER_AGENT = "satprint/0.1 (+terrain relief models)"
@@ -37,6 +45,9 @@ VECTOR_ZOOM = 14  # highest zoom; buildings carry render_height there
 VECTOR_WORKERS = 8
 NOMINATIM_URL = "https://nominatim.openstreetmap.org/search"
 OSM_ATTRIBUTION = "Buildings (c) OpenStreetMap contributors, ODbL"
+OVERTURE_ATTRIBUTION = (
+    "Buildings (c) Overture Maps Foundation and OpenStreetMap contributors, ODbL"
+)
 
 
 TILE_DEG = 0.01  # building tiles: ~1.1 km north-south, a few seconds each
@@ -56,6 +67,23 @@ def buildings_query(bbox: BBox, timeout_s: int = 40) -> str:
         f'relation["building:part"]["type"="multipolygon"]{b};'
         ");out body geom qt;"
     )
+
+
+def shapes_query(bbox: BBox, timeout_s: int = 40) -> str:
+    """Overpass QL for buildings with a shaped roof or a landmark entry.
+
+    The vector tiles carry no roof tags, so this small query supplies them.
+    """
+    b = f"({bbox.south},{bbox.west},{bbox.north},{bbox.east})"
+    shapes = "|".join(ROOF_PROFILES)
+    ids = "|".join(lm.wikidata for lm in LANDMARKS)
+    sets = "".join(
+        f'{kind}["{key}"]["roof:shape"~"^({shapes})$"]{b};'
+        f'{kind}["{key}"]["wikidata"~"^({ids})$"]{b};'
+        for kind in ("way", "relation")
+        for key in ("building", "building:part")
+    )
+    return f"[out:json][timeout:{timeout_s}];({sets});out body geom qt;"
 
 
 def grid_tiles(bbox: BBox, deg: float = TILE_DEG) -> list[tuple[int, int, BBox]]:
@@ -171,6 +199,10 @@ class OverpassClient:
             errors.append("every server failed recently and is being skipped")
         # The last few errors are enough to say why; all of them is noise.
         raise RuntimeError("all Overpass servers failed: " + "; ".join(errors[-3:]))
+
+    def shaped(self, bbox: BBox) -> dict:
+        """Buildings in ``bbox`` with a shaped roof or a landmark entry."""
+        return self.query(shapes_query(bbox))
 
     def buildings(self, bbox: BBox, progress: Progress | None = None) -> dict:
         """Building elements in ``bbox``, fetched tile by tile.
@@ -366,3 +398,36 @@ class Geocoder:
         while len(self._cache) > self._cache_size:
             self._cache.popitem(last=False)
         return out
+
+
+def fetch_buildings(
+    source: str,
+    bbox: BBox,
+    osm: OverpassClient,
+    vtiles: VectorTileClient,
+    progress: Progress | None = None,
+) -> tuple[list[Building], str | None]:
+    """Buildings in ``bbox`` from one source, with roof shapes and landmarks.
+
+    :param source: "openfreemap", "overpass" or "overture".
+    :param bbox: area to cover.
+    :param osm: Overpass client; also supplies roof shapes for OpenFreeMap.
+    :param vtiles: OpenFreeMap vector tile client.
+    :param progress: passed to the download.
+    :return: (buildings, warning); the warning says when the roof shapes
+        could not be fetched and the roofs are flat.
+    """
+    warning = None
+    if source == "overpass":
+        found = buildings_from_osm(osm.buildings(bbox, progress=progress))
+    elif source == "overture":
+        from .overture import buildings_from_overture
+
+        found = buildings_from_overture(bbox, progress=progress)
+    else:
+        found = buildings_from_vector_tiles(vtiles.tiles(bbox, progress=progress))
+        try:
+            found = apply_shapes(found, buildings_from_osm(osm.shaped(bbox)))
+        except Exception as exc:  # shapes refine the buildings; keep them flat
+            warning = f"roof shapes unavailable, roofs are flat: {exc}"
+    return apply_landmarks(found), warning

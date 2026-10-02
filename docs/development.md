@@ -42,7 +42,9 @@ Pages on every push to `main` that touches `docs/`, `satprint/` or
 satprint/
   terrain.py    elevation sources (terrain tiles, synthetic, file), imagery, scaling, hillshade
   mesh.py       heightmap to watertight solid, land/water split, frame, STL, GLB and 3MF writers
-  buildings.py  OSM buildings to closed solids on the terrain
+  buildings.py  OSM buildings to closed solids on the terrain, roof shapes
+  landmarks.py  exact shapes for a few landmarks
+  overture.py   Overture Maps building source (overture extra)
   water.py      water map and the multi-color 3MF parts
   osm.py        OpenFreeMap, Overpass and Nominatim clients
   presets.py    named example areas

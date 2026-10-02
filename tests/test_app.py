@@ -50,6 +50,13 @@ class FakeOverpass(OverpassClient):
             ]
         }
 
+    def shaped(self, bbox):
+        """Shaped roofs for the vector tile source: none, or a failure."""
+        self.shaped_calls = getattr(self, "shaped_calls", 0) + 1
+        if self.fail:
+            raise RuntimeError("all Overpass servers failed: 429")
+        return {"elements": []}
+
 
 class FakeVectorTiles(VectorTileClient):
     """One vector tile with one building at its center, or a failure."""
@@ -384,7 +391,8 @@ def test_openfreemap_is_preferred_and_named():
     }
     info = client.post("/api/model", json=body).json()["info"]
     assert info["building_source"] == "openfreemap" and info["buildings"] >= 1
-    assert overpass.calls == 0
+    assert overpass.calls == 0 and overpass.shaped_calls == 1
+    assert "building_warning" not in info
 
     body["bbox"] = {"south": 40.76, "west": -73.99, "north": 40.77, "east": -73.98}
     info = client.post(
@@ -490,3 +498,18 @@ def test_frame_goes_into_stl_glb_and_3mf():
     doc, _ = read_glb(client.get(j["glb_url"]).content)
     xs = [a for a in doc["accessors"] if a["type"] == "VEC3" and "min" in a]
     assert min(a["min"][0] for a in xs) == pytest.approx(-0.006, abs=1e-6)
+
+
+def test_openfreemap_keeps_flat_roofs_when_shapes_fail():
+    client = make_client(
+        vector_tiles=FakeVectorTiles(), overpass=FakeOverpass(fail=True)
+    )
+    body = {
+        "source": "terrarium",
+        "resolution": 64,
+        "bbox": {"south": 40.90, "west": -73.99, "north": 40.91, "east": -73.98},
+        "buildings": True,
+    }
+    info = client.post("/api/model", json=body).json()["info"]
+    assert info["building_source"] == "openfreemap" and info["buildings"] >= 1
+    assert info["building_warning"].startswith("roof shapes unavailable")

@@ -7,7 +7,8 @@
 | Elevation | [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) | `~/.cache/satprint/tiles` |
 | Imagery (GLB texture) | Esri World Imagery | `~/.cache/satprint/imagery` |
 | Buildings and water | [OpenFreeMap](https://openfreemap.org) vector tiles, zoom 14, rebuilt from OSM about weekly | `~/.cache/satprint/vtiles` |
-| Buildings, fallback | [Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API), 0.01° tiles | `~/.cache/satprint/osm/tiles` |
+| Buildings, fallback; roof shapes | [Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API), 0.01° tiles | `~/.cache/satprint/osm` |
+| Buildings, optional | [Overture Maps](https://overturemaps.org) GeoParquet on S3, per release | `~/.cache/satprint/overture` |
 | Place search | [Nominatim](https://nominatim.org), one request per second | in memory |
 
 None of them needs an API key. Every tile is cached on disk, so a second build
@@ -19,6 +20,30 @@ of the same area downloads nothing.
 - Where OSM maps a building as `building:part` shapes, the parts replace its
   outline, so towers keep their setbacks.
 - Parts are extruded from the ground, ignoring `min_height`, so nothing floats.
+- Roofs tagged `roof:shape` dome, onion, cone or pyramidal get that shape.
+  The roof height comes from `roof:height`, then `roof:levels` at 3 m each,
+  then the radius of the footprint, which makes a dome a hemisphere. Other
+  shapes, such as gabled and hipped, are flat; at print scale a house roof is a
+  fraction of a millimeter.
+- A shaped roof needs a footprint without holes that can see all its corners
+  from its center, and must stand at least 0.3 mm tall in the model. Otherwise
+  the building is flat at its full height.
+- A shaped roof starts no lower than the flat roofs at least half its size that
+  it overlaps, so a dome set into a taller wing does not sit in a pit.
+- Smaller parts standing on a shaped roof, such as a lantern, cupola or statue
+  on a dome, keep their place: the roof stops at the highest ring that still
+  encloses them, and they stand in the hole that leaves. A part that would not
+  reach that ring ends up inside the roof.
+- Of two overlapping shaped roofs that are not standing on each other, the
+  taller keeps its shape and the other is flat.
+- The OpenFreeMap tiles carry no roof tags, so a small Overpass query fetches
+  the shaped buildings in the area and they replace their copies from the
+  tiles. If that query fails, the roofs are flat and the build reports
+  `building_warning`.
+- A few landmarks that roof tags cannot describe get exact shapes from
+  published dimensions, matched by their Wikidata ID or OSM ID
+  (`satprint/landmarks.py`). So far: the Sphere in Las Vegas, a 157 m sphere
+  cut by the ground at 112 m.
 - Overlapping footprints are merged first: each overlap takes the tallest
   height covering it, so the solids touch but never pass through each other.
 - Buildings sink 0.3 mm into the terrain so they fuse with it when sliced.
@@ -33,6 +58,23 @@ Choose Overpass with "Building data" in the web app or
 busy answers are retried with backoff, and a server that times out is skipped
 for 10 minutes. When some tiles fail, the rest stay cached, so generating again
 fetches only the missing ones.
+
+### Overture Maps
+
+Choose Overture with "Building data" in the web app or
+`--building-source overture` on the CLI. [Overture
+Maps](https://overturemaps.org) merges OSM with Microsoft and Google building
+footprints, so it finds buildings OSM lacks, and it keeps the OSM height and
+roof tags. It needs the `overture` extra:
+
+```bash
+pip install "satprint[overture]"     # or: poetry install --extras overture
+```
+
+The extra brings pyarrow, about 190 MB; the Docker image includes it.
+Overture's STAC index picks the GeoParquet files on S3 that cover the area, so
+a query takes a few seconds. Results are cached per Overture release. "auto"
+never picks Overture.
 
 ### Imagery
 
@@ -60,3 +102,5 @@ the imagery. Set `"texture": false` to skip it.
 Terrain Tiles © Mapzen and AWS Open Data (SRTM, ASTER GDEM, GMTED2010, ETOPO1,
 NED, EU-DEM and others). Imagery © Esri, Maxar, Earthstar Geographics. Street
 map, buildings, water and search © OpenStreetMap contributors, under the ODbL.
+Overture buildings © Overture Maps Foundation and OpenStreetMap contributors,
+under the ODbL.

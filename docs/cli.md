@@ -58,7 +58,7 @@ These need `--bbox`.
 |---|---|---|
 | `--buildings` | off | Add OpenStreetMap buildings |
 | `--building-scale X` | 1 | Building height multiplier; 1 is true proportion |
-| `--building-source` | `openfreemap` | `openfreemap` (fast, rebuilt weekly) or `overpass` (latest edits, slower) |
+| `--building-source` | `openfreemap` | `openfreemap` (fast, rebuilt weekly), `overpass` (latest edits, slower) or `overture` (OSM plus Microsoft and Google footprints; needs the `overture` extra) |
 
 ### Output
 

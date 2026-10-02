@@ -22,8 +22,7 @@
 satprint turns real elevation data into a solid relief model scaled to your
 printer: the terrain on top, four walls and a flat base. Cities can carry their
 OpenStreetMap buildings, and the multi-color 3MF splits the model into land,
-water, buildings and a border frame, one filament each. It was inspired by the
-relief models sold by Lichtbild and similar makers.
+water, buildings and a border frame, one filament each.
 
 **Documentation: [suchanek.github.io/satprint](https://suchanek.github.io/satprint/)**
 

@@ -10,7 +10,7 @@ import time
 import uuid
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Literal, Optional
+from typing import Literal
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
 from fastapi.responses import FileResponse, Response
@@ -26,7 +26,15 @@ from .buildings import (
     buildings_from_osm,
     buildings_from_vector_tiles,
 )
-from .mesh import Mesh, heightmap_to_mesh, merge_meshes, write_binary_stl, write_glb
+from .mesh import (
+    Mesh,
+    frame_mesh,
+    heightmap_to_mesh,
+    merge_meshes,
+    write_3mf,
+    write_binary_stl,
+    write_glb,
+)
 from .osm import OSM_ATTRIBUTION, Geocoder, OverpassClient, VectorTileClient
 from .presets import presets as all_presets
 from .terrain import (
@@ -44,6 +52,7 @@ from .terrain import (
     prepare_relief,
     synthetic_heightmap,
 )
+from .water import multicolor_parts, water_from_vector_tiles, water_zoom
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
@@ -80,6 +89,7 @@ class StoredModel:
     info: dict
     created: float
     glb: bytes | None = None
+    threemf: bytes | None = None
 
 
 @dataclass
@@ -113,6 +123,7 @@ class Job:
 jobs = _LRU(64)  # job_id -> Job
 terrain_cache = _LRU(32)  # key -> Heightmap   (downloads are the slow part)
 imagery_cache = _LRU(16)  # bbox key -> (JPEG bytes, meta)
+water_cache = _LRU(16)  # bbox key -> list of water polygons
 buildings_cache = _LRU(16)  # bbox key -> list[Building]
 upload_store = _LRU(16)  # upload_id -> Heightmap
 model_store = _LRU(32)  # model_id -> StoredModel
@@ -132,17 +143,15 @@ class BBoxIn(BaseModel):
 
 class ModelRequest(BaseModel):
     source: Literal["terrarium", "synthetic", "upload"] = "terrarium"
-    bbox: Optional[BBoxIn] = None
-    upload_id: Optional[str] = None
-    ground_width_m: Optional[float] = Field(
-        None, gt=0, description="override for uploads"
-    )
+    bbox: BBoxIn | None = None
+    upload_id: str | None = None
+    ground_width_m: float | None = Field(None, gt=0, description="override for uploads")
     seed: int = 0
     resolution: int = Field(256, ge=32, le=1024, description="grid columns")
     width_mm: float = Field(100.0, ge=10, le=1000)
     base_mm: float = Field(3.0, ge=0.5, le=100)
     exaggeration: float = Field(1.5, ge=0.1, le=20)
-    relief_mm: Optional[float] = Field(None, ge=0.2, le=500)
+    relief_mm: float | None = Field(None, ge=0.2, le=500)
     smoothing: float = Field(0.0, ge=0, le=20)
     clamp_sea_level: bool = True
     texture: bool = Field(
@@ -162,6 +171,17 @@ class ModelRequest(BaseModel):
         description="OpenFreeMap vector tiles (fast, rebuilt weekly), Overpass "
         "(latest OSM edits, slower), or auto: OpenFreeMap, then Overpass",
     )
+    frame_mm: float = Field(
+        0.0, ge=0, le=30, description="border frame width around the model; 0 = none"
+    )
+    frame_height_mm: float | None = Field(
+        None, gt=0, le=100, description="frame height; default base thickness + 1 mm"
+    )
+    multicolor: bool = Field(
+        False,
+        description="also write a 3MF with land, water and buildings as separate "
+        "parts, for multi-material printers (terrarium source only)",
+    )
     name: str = Field("terrain", max_length=60)
 
 
@@ -169,7 +189,8 @@ class ModelResponse(BaseModel):
     model_id: str
     stl_url: str
     png_url: str
-    glb_url: Optional[str] = None
+    glb_url: str | None = None
+    threemf_url: str | None = None
     info: dict
     preview_png: str  # data URL
 
@@ -195,6 +216,18 @@ def create_app(
     imagery = imagery_fetcher or ImageryFetcher()
     osm = overpass or OverpassClient()
     vtiles = vector_tiles or VectorTileClient()
+
+    def _water_for(bbox: BBox, progress: Progress | None = None) -> list:
+        key = _bbox_key(bbox)
+        hit = water_cache.get(key)
+        if hit is None:
+            tiles = vtiles.tiles(
+                bbox, progress=progress, zoom=water_zoom(bbox), stage="water"
+            )
+            hit = water_from_vector_tiles(tiles)
+            water_cache.put(key, hit)
+        return hit
+
     geo = geocoder or Geocoder()
 
     def _bbox_key(bbox: BBox) -> tuple:
@@ -355,6 +388,23 @@ def create_app(
         mesh: Mesh = heightmap_to_mesh(
             relief, info["width_mm"], info["depth_mm"], params.base_mm
         )
+        frame: Mesh | None = None
+        body = mesh  # terrain plus frame: what the STL and GLB carry
+        if req.frame_mm > 0:
+            frame_h = req.frame_height_mm or params.base_mm + 1.0
+            frame = frame_mesh(
+                info["width_mm"], info["depth_mm"], req.frame_mm, frame_h
+            )
+            body = merge_meshes(mesh, frame)
+            info.update(
+                {
+                    "frame_mm": req.frame_mm,
+                    "frame_height_mm": frame_h,
+                    "outer_width_mm": info["width_mm"] + 2 * req.frame_mm,
+                    "outer_depth_mm": info["depth_mm"] + 2 * req.frame_mm,
+                    "height_mm": max(info["height_mm"], frame_h),
+                }
+            )
         rows, cols = relief.shape
         bmesh: BuildingMesh | None = None
         building_info: dict = {}
@@ -393,9 +443,39 @@ def create_app(
                         info["height_mm"] = max(info["height_mm"], top)
         if progress:
             progress("writing files", 0, 0)
-        solid = merge_meshes(mesh, bmesh.as_mesh()) if bmesh and bmesh.count else mesh
+        solid = merge_meshes(body, bmesh.as_mesh()) if bmesh and bmesh.count else body
         stl = write_binary_stl(solid, name=req.name)
         png = heightmap_png(hm, params.clamp_sea_level)
+        threemf = None
+        multicolor_info: dict = {}
+        if req.multicolor and hm.bbox is not None:
+            polygons: list = []
+            try:
+                polygons = _water_for(hm.bbox, progress)
+            except Exception as exc:
+                # Coasts still color from the flattened sea; say why rivers
+                # and lakes are missing.
+                multicolor_info["water_error"] = f"water download failed: {exc}"
+            parts, mask = multicolor_parts(
+                polygons,
+                hm.bbox,
+                relief,
+                info["width_mm"],
+                info["depth_mm"],
+                params.base_mm,
+                sea_level_flat=params.clamp_sea_level and info["min_elev_m"] <= 0,
+                buildings=bmesh,
+                frame=frame,
+            )
+            credits = OSM_ATTRIBUTION if polygons or (bmesh and bmesh.count) else None
+            threemf = write_3mf(parts, name=req.name, attribution=credits)
+            multicolor_info.update(
+                {
+                    "multicolor_parts": [p[0] for p in parts if p[1].faces.shape[0]],
+                    "water_fraction": round(float(mask.mean()), 4),
+                    "threemf_bytes": len(threemf),
+                }
+            )
         glb = None
         texture_info: dict = {"textured": False}
         if req.texture and hm.bbox is not None:
@@ -409,7 +489,7 @@ def create_app(
                 if bmesh and bmesh.count:
                     credits += "; " + OSM_ATTRIBUTION
                 glb = write_glb(
-                    mesh,
+                    body,
                     rows,
                     cols,
                     jpeg,
@@ -440,12 +520,20 @@ def create_app(
                 "generate_seconds": round(time.perf_counter() - t0, 3),
                 **texture_info,
                 **building_info,
+                **multicolor_info,
             }
         )
         model_id = uuid.uuid4().hex[:12]
         model_store.put(
             model_id,
-            StoredModel(stl=stl, png=png, info=info, created=time.time(), glb=glb),
+            StoredModel(
+                stl=stl,
+                png=png,
+                info=info,
+                created=time.time(),
+                glb=glb,
+                threemf=threemf,
+            ),
         )
         safe = (
             "".join(ch if ch.isalnum() or ch in "-_" else "_" for ch in req.name)
@@ -456,6 +544,7 @@ def create_app(
             stl_url=f"/api/model/{model_id}/{safe}.stl",
             png_url=f"/api/model/{model_id}/heightmap.png",
             glb_url=f"/api/model/{model_id}/{safe}.glb" if glb else None,
+            threemf_url=f"/api/model/{model_id}/{safe}.3mf" if threemf else None,
             info=info,
             preview_png="data:image/png;base64," + base64.b64encode(png).decode(),
         )
@@ -511,6 +600,12 @@ def create_app(
             return Response(
                 m.glb,
                 media_type="model/gltf-binary",
+                headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+            )
+        if filename.endswith(".3mf") and m.threemf is not None:
+            return Response(
+                m.threemf,
+                media_type="model/3mf",
                 headers={"Content-Disposition": f'attachment; filename="{filename}"'},
             )
         if filename == "info.json":

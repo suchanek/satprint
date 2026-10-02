@@ -1,4 +1,5 @@
 import io
+import time
 
 import numpy as np
 import pytest
@@ -13,11 +14,8 @@ from tests.test_buildings import encode_tile
 from tests.test_terrain import FakeFetcher, FakeImageryFetcher
 
 
-import time
-
-
 class FakeOverpass(OverpassClient):
-    """Two buildings near the centre of whatever bbox is asked for."""
+    """Two buildings near the center of whatever bbox is asked for."""
 
     def __init__(self, fail=False):
         super().__init__(cache_dir="/nonexistent")
@@ -54,14 +52,14 @@ class FakeOverpass(OverpassClient):
 
 
 class FakeVectorTiles(VectorTileClient):
-    """One vector tile with one building at its centre, or a failure."""
+    """One vector tile with one building at its center, or a failure."""
 
     def __init__(self, fail=False):
         super().__init__(cache_dir="/nonexistent")
         self.fail = fail
         self.calls = 0
 
-    def tiles(self, bbox, progress=None, zoom=14):
+    def tiles(self, bbox, progress=None, zoom=14, stage="buildings"):
         self.calls += 1
         if self.fail:
             raise RuntimeError("tiles.openfreemap.org unreachable")
@@ -71,6 +69,16 @@ class FakeVectorTiles(VectorTileClient):
         out = []
         for ty in range(ty0, ty1 + 1):
             for tx in range(tx0, tx1 + 1):
+                if stage == "water":
+                    # the western half of every tile is a river
+                    feats = [
+                        {
+                            "geometry": box(0, 0, 2048, 4096),
+                            "properties": {"class": "river"},
+                        }
+                    ]
+                    out.append((zoom, tx, ty, encode_tile(feats, layer="water")))
+                    continue
                 # one block over the whole tile, so any area gets a building
                 feats = [
                     {
@@ -402,3 +410,83 @@ def test_auto_falls_back_to_overpass_and_reports_both_failures():
     assert (
         "openfreemap: tiles.openfreemap.org unreachable" in err and "overpass:" in err
     )
+
+
+def test_multicolor_3mf_has_land_water_and_buildings():
+    import zipfile
+
+    client = make_client(vector_tiles=FakeVectorTiles())
+    body = {
+        "source": "terrarium",
+        "resolution": 64,
+        "bbox": {"south": 40.80, "west": -73.99, "north": 40.81, "east": -73.98},
+        "buildings": True,
+        "multicolor": True,
+    }
+    j = client.post("/api/model", json=body).json()
+    info = j["info"]
+    assert info["multicolor_parts"] == ["land", "water", "buildings"]
+    assert 0 < info["water_fraction"] < 1
+    r = client.get(j["threemf_url"])
+    assert (
+        r.headers["content-type"] == "model/3mf"
+        and len(r.content) == info["threemf_bytes"]
+    )
+    with zipfile.ZipFile(io.BytesIO(r.content)) as z:
+        model = z.read("3D/3dmodel.model").decode()
+    assert model.count("<component ") == 3
+
+    plain = client.post("/api/model", json={**body, "multicolor": False}).json()
+    assert plain["threemf_url"] is None
+
+
+def test_multicolor_without_water_tiles_still_writes_3mf():
+    client = make_client()  # vector tiles fail
+    body = {
+        "source": "terrarium",
+        "resolution": 64,
+        "bbox": {"south": 40.82, "west": -73.99, "north": 40.83, "east": -73.98},
+        "multicolor": True,
+    }
+    j = client.post("/api/model", json=body).json()
+    assert "unreachable" in j["info"]["water_error"] and j["threemf_url"]
+
+
+def test_frame_goes_into_stl_glb_and_3mf():
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    client = make_client(vector_tiles=FakeVectorTiles())
+    body = {
+        "source": "terrarium",
+        "resolution": 64,
+        "bbox": {"south": 40.84, "west": -73.99, "north": 40.85, "east": -73.98},
+        "width_mm": 100,
+        "base_mm": 3,
+        "buildings": True,
+        "multicolor": True,
+        "frame_mm": 6,
+    }
+    j = client.post("/api/model", json=body).json()
+    info = j["info"]
+    assert info["outer_width_mm"] == pytest.approx(112)
+    assert info["frame_height_mm"] == pytest.approx(4)
+    tri = read_binary_stl(client.get(j["stl_url"]).content)
+    assert tri[..., 0].min() == pytest.approx(-6) and tri[
+        ..., 0
+    ].max() == pytest.approx(106)
+    assert info["multicolor_parts"] == ["land", "water", "buildings", "border"]
+    with zipfile.ZipFile(io.BytesIO(client.get(j["threemf_url"]).content)) as z:
+        cfg = ET.fromstring(z.read("Metadata/model_settings.config"))
+    parts = {
+        m.get("value")
+        for p in cfg.iter("part")
+        for m in p.findall("metadata")
+        if m.get("key") == "name"
+    }
+    border = [p for p in cfg.iter("part") if any(m.get("value") == "border" for m in p)]
+    assert parts == {"land", "water", "buildings", "border"}
+    assert [m.get("value") for m in border[0] if m.get("key") == "extruder"] == ["4"]
+    doc, _ = read_glb(client.get(j["glb_url"]).content)
+    xs = [a for a in doc["accessors"] if a["type"] == "VEC3" and "min" in a]
+    assert min(a["min"][0] for a in xs) == pytest.approx(-0.006, abs=1e-6)

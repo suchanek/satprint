@@ -1,8 +1,7 @@
-import pytest
-
 import gzip
 import json
 
+import pytest
 import requests
 
 from satprint.osm import TILE_DEG, Geocoder, OverpassClient, buildings_query, grid_tiles

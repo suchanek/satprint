@@ -1,0 +1,35 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1130 410" role="img" aria-labelledby="t">
+  <title id="t">satprint</title>
+  <g transform="translate(-36 -76)">
+
+  <!-- A printed relief block, in the four print colors: land, water,
+       buildings and peaks, and the border frame as the block's sides. -->
+  <!-- block sides: the border frame -->
+  <path d="M56 286 L256 402 L256 462 L56 346 Z" fill="#3A3F44"/>
+  <path d="M256 402 L456 286 L456 346 L256 462 Z" fill="#4C5258"/>
+  <!-- top face rim -->
+  <path d="M256 170 L456 286 L256 402 L56 286 Z" fill="#6F8048"/>
+  <!-- terrain: two ridges rising off the top face -->
+  <path d="M56 286 L150 214 L196 238 L292 112 L366 196 L404 180 L456 286 L256 402 Z" fill="#8A9A5B"/>
+  <path d="M292 112 L366 196 L404 180 L456 286 L330 214 Z" fill="#748446"/>
+  <path d="M150 214 L196 238 L172 252 L56 286 Z" fill="#748446"/>
+  <!-- snow on the main peak -->
+  <path d="M292 112 L326 152 L308 146 L294 162 L276 146 L262 152 Z" fill="#F4F4F2"/>
+  <!-- river across the front of the valley -->
+  <path d="M96 309 C150 300 180 330 236 322 C286 315 320 300 384 306 L360 320 C310 316 284 334 236 340 C184 346 150 318 122 324 Z" fill="#2F6FB3"/>
+  <!-- light rim on the front edges, so the block reads on dark backgrounds -->
+  <path d="M56 286 L256 402 L456 286" fill="none" stroke="#B5C27F" stroke-width="5" stroke-linejoin="round"/>
+  <!-- buildings on the right bank -->
+  <path d="M336 300 L352 291 L352 262 L336 271 Z" fill="#E8E8E8"/>
+  <path d="M352 291 L364 298 L364 269 L352 262 Z" fill="#C9C9C9"/>
+  <path d="M336 271 L352 262 L364 269 L348 278 Z" fill="#FFFFFF"/>
+  <path d="M372 284 L384 277 L384 236 L372 243 Z" fill="#E8E8E8"/>
+  <path d="M384 277 L394 283 L394 242 L384 236 Z" fill="#C9C9C9"/>
+  <path d="M372 243 L384 236 L394 242 L382 249 Z" fill="#FFFFFF"/>
+  <path d="M398 290 L410 283 L410 262 L398 269 Z" fill="#E8E8E8"/>
+  <path d="M410 283 L420 289 L420 268 L410 262 Z" fill="#C9C9C9"/>
+  <path d="M398 269 L410 262 L420 268 L408 275 Z" fill="#FFFFFF"/>
+  </g>
+  <text x="470" y="236" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="168" font-weight="700" letter-spacing="-4" fill="#1F2328">satprint</text>
+  <text x="476" y="318" font-family="Inter, 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="50" font-weight="500" fill="#59636E">satellite terrain to 3D print</text>
+</svg>

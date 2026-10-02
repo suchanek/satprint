@@ -272,20 +272,25 @@ class VectorTileClient:
         return resp.content
 
     def tiles(
-        self, bbox: BBox, progress: Progress | None = None, zoom: int = VECTOR_ZOOM
+        self,
+        bbox: BBox,
+        progress: Progress | None = None,
+        zoom: int = VECTOR_ZOOM,
+        stage: str = "buildings",
     ) -> list[tuple[int, int, int, bytes]]:
         """(z, x, y, tile bytes) for every tile covering ``bbox``.
 
         :param bbox: area to cover.
-        :param progress: called as ``progress("buildings", done, total)``.
+        :param progress: called as ``progress(stage, done, total)``.
         :param zoom: tile zoom.
+        :param stage: stage name to report.
         :return: the tiles, in row order.
         """
         tx0, ty0, tx1, ty1 = _tile_range(bbox, zoom)
         coords = [(tx, ty) for ty in range(ty0, ty1 + 1) for tx in range(tx0, tx1 + 1)]
         out: list = [None] * len(coords)
         if progress:
-            progress("buildings", 0, len(coords))
+            progress(stage, 0, len(coords))
         with ThreadPoolExecutor(max_workers=min(VECTOR_WORKERS, len(coords))) as pool:
             futures = {
                 pool.submit(self.fetch, zoom, tx, ty): i
@@ -295,7 +300,7 @@ class VectorTileClient:
                 i = futures[fut]
                 out[i] = (zoom, coords[i][0], coords[i][1], fut.result())
                 if progress:
-                    progress("buildings", done, len(coords))
+                    progress(stage, done, len(coords))
         return out
 
 

@@ -1,0 +1,105 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# Superseded runs are cancelled; the key is the PR number where there is one,
+# so a force-push to a branch does not cancel the PR's own run.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    name: Lint & Format
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      # Ruff reads no project code, so it needs no install of the package.
+      - name: Install ruff
+        run: pip install ruff
+
+      - name: Lint
+        run: ruff check satprint tests
+
+      - name: Format check
+        run: ruff format --check satprint tests
+
+  type-check:
+    name: Type Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install package and ty
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install ty
+
+      - name: Type check
+        run: ty check satprint/
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    # Both supported interpreters: requires-python allows 3.13, so it is tested.
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.12", "3.13"]
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: ${{ matrix.python-version }}
+
+      # The suite is offline: every tile, building and search client is faked.
+      - name: Install package
+        run: |
+          python -m pip install --upgrade pip
+          pip install -e .
+          pip install pytest httpx
+
+      - name: Test
+        run: pytest
+
+  installed-cli:
+    name: Installed CLI
+    runs-on: ubuntu-latest
+    # The other jobs run against the source tree. This builds the wheel users
+    # receive, installs it with no source tree in sight, and builds a model,
+    # so a wheel missing the web app's static files or a module fails here.
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+
+      - name: Install the package into a clean venv
+        run: |
+          python -m venv /tmp/clean
+          /tmp/clean/bin/pip install --quiet .
+
+      - name: Build the offline demo model
+        run: |
+          cd /tmp
+          /tmp/clean/bin/satprint build --synthetic --resolution 64 -o demo.stl
+          /tmp/clean/bin/python -c "import importlib.resources as r; assert (r.files('satprint') / 'static' / 'index.html').is_file()"

@@ -12,6 +12,7 @@ from satprint.buildings import (
     buildings_from_osm,
     buildings_from_vector_tiles,
     parse_height,
+    resolve_overlaps,
 )
 from satprint.mesh import check_watertight, heightmap_to_mesh, merge_meshes
 from satprint.terrain import BBox
@@ -173,10 +174,10 @@ def test_no_buildings_gives_empty_mesh():
     assert bm.count == 0 and bm.vertices.shape == (0, 3)
 
 
-def encode_tile(features, compress=True):
-    """An OpenMapTiles-style tile with a ``building`` layer."""
+def encode_tile(features, compress=True, layer="building"):
+    """An OpenMapTiles-style tile with one layer, ``building`` by default."""
     data = mapbox_vector_tile.encode(
-        [{"name": "building", "features": features}],
+        [{"name": layer, "features": features}],
         default_options={"extents": 4096, "y_coord_down": True},
     )
     return gzip.compress(data) if compress else data
@@ -228,3 +229,52 @@ def test_vector_tile_buildings():
 def test_vector_tile_without_buildings():
     empty = mapbox_vector_tile.encode([{"name": "water", "features": []}])
     assert buildings_from_vector_tiles([(14, 0, 0, empty)]) == []
+
+
+def test_resolve_overlaps_keeps_the_tallest_and_removes_overlap():
+    import shapely
+
+    low = box(0, 0, 10, 10)
+    high = box(5, 5, 15, 15)  # overlaps low by 25
+    spire = box(12, 12, 13, 13)  # inside high, taller still
+    alone = box(30, 0, 35, 5)
+    touching = box(35, 0, 40, 5)  # shares an edge with alone only
+    out = resolve_overlaps(
+        [(low, 10.0), (high, 20.0), (spire, 50.0), (alone, 7.0), (touching, 9.0)]
+    )
+    polys = [p for p, _ in out]
+    union = shapely.union_all([low, high, alone, touching])
+    assert sum(p.area for p in polys) == pytest.approx(union.area)
+    for i, p in enumerate(polys):
+        for q in polys[i + 1 :]:
+            assert p.intersection(q).area < 1e-9
+
+    def height_at(x, y):
+        from shapely import Point
+
+        (h,) = [h for p, h in out if p.contains(Point(x, y))]
+        return h
+
+    assert height_at(2, 2) == 10 and height_at(7, 7) == 20 and height_at(14, 6) == 20
+    assert height_at(12.5, 12.5) == 50
+    assert (alone, 7.0) in out and (touching, 9.0) in out  # untouched
+
+
+def test_overlapping_buildings_mesh_without_overlap():
+    a = way(_square(40.002, -73.998, 0.002), building="yes", height="30")
+    b = way(_square(40.003, -73.997, 0.002), building="yes", height="60")
+    relief, width, depth, mm_per_m = _block()
+    bm = building_mesh(
+        buildings_from_osm({"elements": [a, b]}),
+        BBOX,
+        relief,
+        width,
+        depth,
+        3.0,
+        mm_per_m,
+    )
+    assert check_watertight(bm.as_mesh())["watertight"]
+    # three pieces: a's own part, the shared part at 60 m, and b's own part,
+    # merged by height into two solids that only touch
+    assert bm.count == 2
+    assert bm.as_mesh().volume_mm3() > 0

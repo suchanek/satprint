@@ -10,7 +10,7 @@ a { color: var(--accent); }
 header { display: flex; justify-content: space-between; align-items: center;
   padding: 18px 28px; border-bottom: 1px solid var(--line); }
 .brand { display: flex; gap: 14px; align-items: center; }
-.logo { font-size: 30px; color: var(--accent); }
+.logo { display: block; width: 44px; height: auto; }
 h1 { margin: 0; font-size: 22px; letter-spacing: .02em; }
 header p { margin: 2px 0 0; color: var(--muted); font-size: 13px; }
 nav a { text-decoration: none; color: var(--muted); font-weight: 600; }
@@ -58,8 +58,8 @@ summary { cursor: pointer; color: var(--muted); font-size: 13px; }
 aside img { width: 100%; border-radius: 8px; border: 1px solid var(--line); image-rendering: auto; }
 dl { display: grid; grid-template-columns: auto 1fr; gap: 4px 12px; font-size: 13px; margin: 12px 0; }
 dt { color: var(--muted); } dd { margin: 0; font-variant-numeric: tabular-nums; }
-#btn-download, #btn-download-glb { width: 100%; }
-#btn-download-glb { margin-top: 8px; }
+#btn-download, #btn-download-glb, #btn-download-3mf { width: 100%; }
+#btn-download-glb, #btn-download-3mf { margin-top: 8px; }
 footer { color: var(--muted); font-size: 12px; text-align: center; padding: 20px; border-top: 1px solid var(--line); }
 @media (max-width: 1000px) { main, .preview-row { grid-template-columns: 1fr; } #map { height: 320px; } }
 .search { position: relative; display: flex; gap: 8px; margin-bottom: 10px; }

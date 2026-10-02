@@ -127,8 +127,8 @@ function bboxForResult(r) {
   const [s, w, n, e] = r.bbox;
   const [wm, hm] = groundSize({ south: s, west: w, north: n, east: e });
   const km = Math.max(wm, hm) / 1000;
-  // A big extent (Tokyo's includes islands 1000 km out) can be centred at
-  // sea; use the place's own point then, and the extent centre otherwise.
+  // A big extent (Tokyo's includes islands 1000 km out) can be centered at
+  // sea; use the place's own point then, and the extent center otherwise.
   const lat = km > 5 ? r.lat : (s + n) / 2, lon = km > 5 ? r.lon : (w + e) / 2;
   if (r.category === "natural" || NATURAL_TYPES.has(r.type)) return squareAround(lat, lon, Math.min(Math.max(km, 10), 30));
   return squareAround(lat, lon, Math.min(Math.max(km, 1.5), 5));
@@ -252,7 +252,7 @@ function disposeModel(v) {
 }
 
 // Show the textured GLB when there is one, otherwise the STL.
-// GLB is in metres, Y up; STL is in mm, Z up. Both end up in mm, Y up, centred.
+// GLB is in meters, Y up; STL is in mm, Z up. Both end up in mm, Y up, centered.
 async function showModel(buffer, info, isGLB) {
   let v;
   try { v = await initViewer(); }
@@ -267,10 +267,10 @@ async function showModel(buffer, info, isGLB) {
   if (isGLB) {
     const gltf = await new GLTFLoader().parseAsync(buffer, "");
     const model = gltf.scene;
-    model.scale.setScalar(1000);    // metres -> mm, to match the grid and camera
+    model.scale.setScalar(1000);    // meters -> mm, to match the grid and camera
     model.updateMatrixWorld(true);
-    const centre = new THREE.Box3().setFromObject(model).getCenter(new THREE.Vector3());
-    model.position.sub(centre);
+    const center = new THREE.Box3().setFromObject(model).getCenter(new THREE.Vector3());
+    model.position.sub(center);
     v.mesh = model;
   } else {
     const geom = new STLLoader().parse(buffer);
@@ -298,7 +298,8 @@ const STAGE_LABELS = {
   "building mesh": "Building solids",
   "terrain mesh": "Terrain mesh",
   imagery: "Imagery tiles",
-  "writing files": "Writing STL and GLB",
+  water: "Water data tiles",
+  "writing files": "Writing files",
 };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const errorText = (j) => (typeof j.detail === "string" ? j.detail : JSON.stringify(j.detail));
@@ -336,7 +337,9 @@ $("btn-generate").addEventListener("click", async () => {
     exaggeration: +$("exaggeration").value, relief_mm: relief ? +relief : null,
     smoothing: +$("smoothing").value, clamp_sea_level: $("clamp").checked, texture: $("texture").checked,
     buildings: $("buildings").checked, building_scale: +$("building_scale").value || 1,
-    building_source: $("building_source").value,
+    building_source: $("building_source").value, multicolor: $("multicolor").checked,
+    frame_mm: +$("frame_mm").value || 0,
+    frame_height_mm: $("frame_height_mm").value ? +$("frame_height_mm").value : null,
     name: $("name").value || "terrain",
   };
   $("btn-generate").disabled = true;
@@ -347,7 +350,8 @@ $("btn-generate").addEventListener("click", async () => {
     const i = j.info;
     $("hillshade").src = j.preview_png; $("hillshade").hidden = false;
     $("stats").innerHTML = [
-      ["Model size", `${fmt(i.width_mm)} × ${fmt(i.depth_mm)} × ${fmt(i.height_mm)} mm`],
+      ["Model size", `${fmt(i.outer_width_mm ?? i.width_mm)} × ${fmt(i.outer_depth_mm ?? i.depth_mm)} × ${fmt(i.height_mm)} mm` +
+        (i.frame_mm ? ` (with ${fmt(i.frame_mm)} mm frame)` : "")],
       ["Relief", `${fmt(i.relief_mm)} mm  (${fmt(i.relief_m, 0)} m real)`],
       ["Elevation", `${fmt(i.min_elev_m, 0)} – ${fmt(i.max_elev_m, 0)} m`],
       ["Plan scale", i.plan_scale],
@@ -357,6 +361,7 @@ $("btn-generate").addEventListener("click", async () => {
       ["Est. PLA", `${fmt(i.est_weight_g_pla_20pct, 0)} g @ 20 % infill · ${fmt(i.est_weight_g_pla_solid, 0)} g solid`],
       ["Source", i.source + (i.source_meta?.zoom != null ? ` (zoom ${i.source_meta.zoom}, ${i.source_meta.tiles} tiles)` : "")],
       ...(i.buildings != null ? [["Buildings", `${fmt(i.buildings, 0)} (OpenStreetMap via ${i.building_source === "openfreemap" ? "OpenFreeMap" : "Overpass"})`]] : []),
+      ...(i.multicolor_parts ? [["Multi-color", `${i.multicolor_parts.join(", ")} (${fmt(i.water_fraction * 100, 0)} % water)`]] : []),
       ...(i.textured ? [["Texture", `${i.texture_meta.px[1]} × ${i.texture_meta.px[0]} px (zoom ${i.texture_meta.zoom}, ${i.texture_meta.tiles} tiles)`]] : []),
     ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
     const previewUrl = j.glb_url || j.stl_url;
@@ -371,7 +376,14 @@ $("btn-generate").addEventListener("click", async () => {
       glb.href = j.glb_url; glb.download = j.glb_url.split("/").pop();
       glb.textContent = `Download textured GLB (${fmt(i.glb_bytes / 1048576, 1)} MB)`;
     }
+    const mc = $("btn-download-3mf");
+    mc.hidden = !j.threemf_url;
+    if (j.threemf_url) {
+      mc.href = j.threemf_url; mc.download = j.threemf_url.split("/").pop();
+      mc.textContent = `Download multi-color 3MF (${fmt(i.threemf_bytes / 1048576, 1)} MB)`;
+    }
     const problems = [
+      i.water_error && `No rivers or lakes: ${i.water_error}`,
       i.texture_error && `No texture: ${i.texture_error}`,
       i.building_error && `No buildings: ${i.building_error}`,
     ].filter(Boolean);

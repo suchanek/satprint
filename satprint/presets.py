@@ -1,6 +1,6 @@
 """Named example areas for the web UI.
 
-Each entry is a centre and a square size in km; :func:`presets` turns them
+Each entry is a center and a square size in km; :func:`presets` turns them
 into bounding boxes. City areas are kept to a few km so their buildings
 stay printable and the Overpass download stays small.
 """
@@ -88,7 +88,7 @@ _NATURE = [
 
 
 def around(lat: float, lon: float, size_km: float) -> list[float]:
-    """Square bbox [S, W, N, E] of ``size_km`` centred on (lat, lon)."""
+    """Square bbox [S, W, N, E] of ``size_km`` centered on (lat, lon)."""
     dlat = size_km / 2 / 111.32
     dlon = size_km / 2 / (111.32 * math.cos(math.radians(lat)))
     return [

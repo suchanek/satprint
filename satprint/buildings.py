@@ -53,7 +53,7 @@ class Building:
 
 
 def parse_height(tags: dict) -> float:
-    """Building height in metres from OSM tags."""
+    """Building height in meters from OSM tags."""
     raw = tags.get("height", "").split(";")[0]
     if m := _FEET.match(raw):
         return float(m.group(1)) * 0.3048
@@ -139,25 +139,25 @@ def buildings_from_osm(data: dict) -> list[Building]:
     return outlines + parts
 
 
-def buildings_from_vector_tiles(
-    tiles: list[tuple[int, int, int, bytes]],
-) -> list[Building]:
-    """Parse the ``building`` layer of OpenMapTiles vector tiles.
+def vector_tile_features(
+    tiles: list[tuple[int, int, int, bytes]], layer: str
+) -> list[tuple[Polygon, dict]]:
+    """Polygons of one layer of OpenMapTiles vector tiles, in lon/lat.
 
     Each feature is clipped to its own tile, without the tile buffer, so a
-    building crossing a tile edge comes back as two pieces that meet at the
+    shape crossing a tile edge comes back as two pieces that meet at the
     edge instead of two overlapping copies.
     """
-    out: list[Building] = []
+    out: list[tuple[Polygon, dict]] = []
     for z, x, y, data in tiles:
         if data[:2] == b"\x1f\x8b":
             data = gzip.decompress(data)
-        layer = mapbox_vector_tile.decode(
+        found = mapbox_vector_tile.decode(
             data, default_options={"y_coord_down": True}
-        ).get("building")
-        if not layer:
+        ).get(layer)
+        if not found:
             continue
-        extent = layer["extent"]
+        extent = found["extent"]
         frame = box(0, 0, extent, extent)
         n = 2**z
 
@@ -167,27 +167,54 @@ def buildings_from_vector_tiles(
             lat = np.degrees(np.arctan(np.sinh(math.pi * (1 - 2 * gy))))
             return np.column_stack([gx * 360.0 - 180.0, lat])
 
-        for f in layer["features"]:
-            props = f["properties"]
-            if props.get("hide_3d"):
-                continue  # an outline drawn by its building:part features
+        for f in found["features"]:
+            if f["geometry"]["type"] not in ("Polygon", "MultiPolygon"):
+                continue
             geom = shapely.make_valid(shape(f["geometry"])).intersection(frame)
-            height = float(props.get("render_height") or DEFAULT_HEIGHT_M)
-            is_part = float(props.get("render_min_height") or 0) > 0
             for poly in _polygons(geom):
                 if poly.area > 0:
-                    out.append(
-                        Building(shapely.transform(poly, to_lonlat), height, is_part)
-                    )
+                    out.append((shapely.transform(poly, to_lonlat), f["properties"]))
+    return out
+
+
+def buildings_from_vector_tiles(
+    tiles: list[tuple[int, int, int, bytes]],
+) -> list[Building]:
+    """Parse the ``building`` layer of OpenMapTiles vector tiles."""
+    out: list[Building] = []
+    for poly, props in vector_tile_features(tiles, "building"):
+        if props.get("hide_3d"):
+            continue  # an outline drawn by its building:part features
+        height = float(props.get("render_height") or DEFAULT_HEIGHT_M)
+        is_part = float(props.get("render_min_height") or 0) > 0
+        out.append(Building(poly, height, is_part))
     return out
 
 
 def _mercator(lon: np.ndarray, lat: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
-    """Normalised Web Mercator, x right and y down, both 0..1 over the world."""
+    """Normalized Web Mercator, x right and y down, both 0..1 over the world."""
     lat_r = np.radians(lat)
     mx = (lon + 180.0) / 360.0
     my = (1.0 - np.log(np.tan(lat_r) + 1.0 / np.cos(lat_r)) / math.pi) / 2.0
     return mx, my
+
+
+def model_projection(bbox: BBox, width_mm: float, depth_mm: float):
+    """lon/lat (n, 2) -> model mm (n, 2) for a block covering ``bbox``.
+
+    Linear in Web Mercator, as the heightmap and texture are, with X east
+    and Y north.
+    """
+    mx0, my0 = _mercator(np.array([bbox.west]), np.array([bbox.north]))
+    mx1, my1 = _mercator(np.array([bbox.east]), np.array([bbox.south]))
+
+    def to_model(coords: np.ndarray) -> np.ndarray:
+        mx, my = _mercator(coords[:, 0], coords[:, 1])
+        x = (mx - mx0) / (mx1 - mx0) * width_mm
+        y = (my1 - my) / (my1 - my0) * depth_mm
+        return np.column_stack([x, y])
+
+    return to_model
 
 
 def _sample(
@@ -291,20 +318,13 @@ def building_mesh(
     relief = np.asarray(relief_mm, dtype=np.float64)
     if np.min(relief) < 0:  # match heightmap_to_mesh
         relief = relief - np.min(relief)
-    mx0, my0 = _mercator(np.array([bbox.west]), np.array([bbox.north]))
-    mx1, my1 = _mercator(np.array([bbox.east]), np.array([bbox.south]))
-
-    def to_model(coords: np.ndarray) -> np.ndarray:
-        mx, my = _mercator(coords[:, 0], coords[:, 1])
-        x = (mx - mx0) / (mx1 - mx0) * width_mm
-        y = (my1 - my) / (my1 - my0) * depth_mm
-        return np.column_stack([x, y])
-
+    to_model = model_projection(bbox, width_mm, depth_mm)
     inset = 0.05  # keep walls off the block's own walls
     frame = box(inset, inset, width_mm - inset, depth_mm - inset)
     verts, roofs, walls = [], [], []
     offset = 0
     count = 0
+    footprints: list[tuple[Polygon, float]] = []
     for n_done, b in enumerate(buildings):
         if progress and n_done % 500 == 0:
             progress("building mesh", n_done, len(buildings))
@@ -313,24 +333,25 @@ def building_mesh(
         h_mm = max(b.height_m * mm_per_m * scale, min_height_mm)
         for poly in _polygons(clipped):
             poly = poly.simplify(simplify_mm, preserve_topology=True)
-            if not isinstance(poly, Polygon) or poly.area < min_area_mm2:
-                continue
-            ring_pts = np.vstack(
-                [np.asarray(poly.exterior.coords)]
-                + [np.asarray(r.coords) for r in poly.interiors]
-            )
-            ground = _sample(relief, width_mm, depth_mm, ring_pts) + base_mm
-            prism = _prism(
-                poly, float(ground.min()) - sink_mm, float(ground.max()) + h_mm
-            )
-            if prism is None:
-                continue
-            v, r, w = prism
-            verts.append(v)
-            roofs.append(r + offset)
-            walls.append(w + offset)
-            offset += v.shape[0]
-            count += 1
+            if isinstance(poly, Polygon) and poly.area >= min_area_mm2:
+                footprints.append((poly, h_mm))
+    for poly, h_mm in resolve_overlaps(footprints):
+        if poly.area < min_area_mm2:
+            continue
+        ring_pts = np.vstack(
+            [np.asarray(poly.exterior.coords)]
+            + [np.asarray(r.coords) for r in poly.interiors]
+        )
+        ground = _sample(relief, width_mm, depth_mm, ring_pts) + base_mm
+        prism = _prism(poly, float(ground.min()) - sink_mm, float(ground.max()) + h_mm)
+        if prism is None:
+            continue
+        v, r, w = prism
+        verts.append(v)
+        roofs.append(r + offset)
+        walls.append(w + offset)
+        offset += v.shape[0]
+        count += 1
     if not verts:
         return BuildingMesh.empty()
     return BuildingMesh(
@@ -339,6 +360,70 @@ def building_mesh(
         wall_faces=np.vstack(walls),
         count=count,
     )
+
+
+def resolve_overlaps(
+    footprints: list[tuple[Polygon, float]], tolerance: float = 1e-6
+) -> list[tuple[Polygon, float]]:
+    """Replace overlapping footprints with non-overlapping pieces.
+
+    OSM footprints overlap: a tower's parts stack over its base, and
+    neighboring outlines cross by a few centimeters. Extruded as they are,
+    those prisms pass through each other, which slicers report as invalid
+    geometry. Within each group of overlapping footprints, every piece of
+    the overlay takes the tallest height covering it, and pieces of equal
+    height are merged, so the solids only touch along shared walls.
+    Footprints that overlap nothing pass through unchanged.
+
+    :param footprints: (polygon, height) pairs, in any planar units.
+    :param tolerance: overlap area below which two footprints count as only
+        touching.
+    :return: (polygon, height) pairs with no overlapping interiors.
+    """
+    if len(footprints) < 2:
+        return list(footprints)
+    polys = np.array([p for p, _ in footprints], dtype=object)
+    heights = np.array([h for _, h in footprints])
+    a, b = STRtree(polys).query(polys, predicate="intersects")
+    keep = a < b
+    a, b = a[keep], b[keep]
+    if a.size:
+        real = shapely.area(shapely.intersection(polys[a], polys[b])) > tolerance
+        a, b = a[real], b[real]
+
+    parent = list(range(len(polys)))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    for i, j in zip(a.tolist(), b.tolist(), strict=True):
+        ri, rj = find(i), find(j)
+        if ri != rj:
+            parent[ri] = rj
+    groups: dict[int, list[int]] = {}
+    for i in range(len(polys)):
+        groups.setdefault(find(i), []).append(i)
+
+    out: list[tuple[Polygon, float]] = []
+    for members in groups.values():
+        if len(members) == 1:
+            out.append(footprints[members[0]])
+            continue
+        lines = shapely.union_all([polys[i].boundary for i in members])
+        by_height: dict[float, list[Polygon]] = {}
+        for face in polygonize(lines.geoms if hasattr(lines, "geoms") else [lines]):
+            pt = face.representative_point()
+            covering = [heights[i] for i in members if polys[i].covers(pt)]
+            if covering:  # else a hole enclosed by the group
+                by_height.setdefault(round(float(max(covering)), 4), []).append(face)
+        for h, faces in by_height.items():
+            for poly in _polygons(shapely.make_valid(unary_union(faces))):
+                if poly.area > tolerance:
+                    out.append((poly, h))
+    return out
 
 
 def bbox_area_km2(bbox: BBox) -> float:

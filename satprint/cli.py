@@ -1,11 +1,14 @@
 """Command-line interface.
 
-satprint serve [--host 0.0.0.0] [--port 7417]
-satprint build --bbox S W N E [--width 120] [--exaggeration 2] -o model.stl
-satprint build --bbox S W N E --glb model.glb -o model.stl
-satprint build --bbox S W N E --buildings [--building-scale 2] -o city.stl
-satprint build --synthetic -o demo.stl
-satprint build --file dem.tif --ground-width 15000 -o model.stl
+Usage:
+
+    satprint serve [--host 0.0.0.0] [--port 7417]
+    satprint build --bbox S W N E [--width 120] [--exaggeration 2] -o model.stl
+    satprint build --bbox S W N E --glb model.glb -o model.stl
+    satprint build --bbox S W N E --buildings [--building-scale 2] -o city.stl
+    satprint build --bbox S W N E --buildings --frame 5 --3mf city.3mf -o city.stl
+    satprint build --synthetic -o demo.stl
+    satprint build --file dem.tif --ground-width 15000 -o model.stl
 """
 
 from __future__ import annotations
@@ -24,8 +27,10 @@ from .buildings import (
 )
 from .mesh import (
     check_watertight,
+    frame_mesh,
     heightmap_to_mesh,
     merge_meshes,
+    write_3mf,
     write_binary_stl,
     write_glb,
 )
@@ -41,6 +46,7 @@ from .terrain import (
     prepare_relief,
     synthetic_heightmap,
 )
+from .water import multicolor_parts, water_from_vector_tiles, water_zoom
 
 
 def _build(args) -> int:
@@ -60,8 +66,8 @@ def _build(args) -> int:
     else:
         print("error: give --bbox, --file or --synthetic", file=sys.stderr)
         return 2
-    if (args.glb or args.buildings) and hm.bbox is None:
-        print("error: --glb and --buildings need --bbox", file=sys.stderr)
+    if (args.glb or args.buildings or args.threemf) and hm.bbox is None:
+        print("error: --glb, --buildings and --3mf need --bbox", file=sys.stderr)
         return 2
     if args.buildings and hm.bbox and bbox_area_km2(hm.bbox) > MAX_BUILDING_AREA_KM2:
         print(
@@ -81,6 +87,15 @@ def _build(args) -> int:
     )
     relief, info = prepare_relief(hm, params)
     mesh = heightmap_to_mesh(relief, info["width_mm"], info["depth_mm"], params.base_mm)
+    frame = None
+    body = mesh
+    if args.frame > 0:
+        frame_h = args.frame_height or params.base_mm + 1.0
+        frame = frame_mesh(info["width_mm"], info["depth_mm"], args.frame, frame_h)
+        body = merge_meshes(mesh, frame)
+        info["outer_width_mm"] = info["width_mm"] + 2 * args.frame
+        info["outer_depth_mm"] = info["depth_mm"] + 2 * args.frame
+        info["height_mm"] = max(info["height_mm"], frame_h)
     bmesh = None
     if args.buildings:
         assert hm.bbox is not None
@@ -104,7 +119,7 @@ def _build(args) -> int:
             info["height_mm"] = max(
                 info["height_mm"], float(bmesh.vertices[:, 2].max())
             )
-    solid = merge_meshes(mesh, bmesh.as_mesh()) if bmesh and bmesh.count else mesh
+    solid = merge_meshes(body, bmesh.as_mesh()) if bmesh and bmesh.count else body
     write_binary_stl(solid, args.output, name=args.name)
     info["triangles"] = solid.triangle_count
     info["volume_cm3"] = solid.volume_mm3() / 1000
@@ -119,7 +134,7 @@ def _build(args) -> int:
         with open(args.glb, "wb") as fh:
             fh.write(
                 write_glb(
-                    mesh,
+                    body,
                     rows,
                     cols,
                     buf.getvalue(),
@@ -131,6 +146,25 @@ def _build(args) -> int:
             )
         info["texture_meta"] = meta
         print(f"wrote {args.glb}", file=sys.stderr)
+    if args.threemf:
+        assert hm.bbox is not None
+        print("fetching water ...", file=sys.stderr)
+        tiles = VectorTileClient().tiles(hm.bbox, zoom=water_zoom(hm.bbox))
+        parts, mask = multicolor_parts(
+            water_from_vector_tiles(tiles),
+            hm.bbox,
+            relief,
+            info["width_mm"],
+            info["depth_mm"],
+            params.base_mm,
+            sea_level_flat=params.clamp_sea_level and info["min_elev_m"] <= 0,
+            buildings=bmesh,
+            frame=frame,
+        )
+        with open(args.threemf, "wb") as fh:
+            fh.write(write_3mf(parts, name=args.name, attribution=OSM_ATTRIBUTION))
+        info["water_fraction"] = round(float(mask.mean()), 4)
+        print(f"wrote {args.threemf}", file=sys.stderr)
     if args.preview:
         with open(args.preview, "wb") as fh:
             fh.write(heightmap_png(hm, params.clamp_sea_level))
@@ -170,7 +204,7 @@ def main(argv=None) -> int:
         "--synthetic", action="store_true", help="procedural demo terrain (offline)"
     )
     b.add_argument(
-        "--ground-width", type=float, help="real-world width in metres (for --file)"
+        "--ground-width", type=float, help="real-world width in meters (for --file)"
     )
     b.add_argument("--seed", type=int, default=0)
     b.add_argument("--resolution", type=int, default=256, help="grid columns (32-1024)")
@@ -196,6 +230,23 @@ def main(argv=None) -> int:
     b.add_argument("--preview", help="also write a hillshade PNG here")
     b.add_argument(
         "--glb", help="also write a GLB with satellite imagery here (needs --bbox)"
+    )
+    b.add_argument(
+        "--frame",
+        type=float,
+        default=0.0,
+        help="border frame width in mm around the model (0 = none)",
+    )
+    b.add_argument(
+        "--frame-height",
+        type=float,
+        help="frame height in mm (default: base thickness + 1)",
+    )
+    b.add_argument(
+        "--3mf",
+        dest="threemf",
+        help="also write a multi-color 3MF here: land, water, buildings and "
+        "border as separate parts (needs --bbox)",
     )
     b.add_argument(
         "--buildings",

@@ -11,6 +11,16 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - **Zenodo DOI**: the concept DOI `10.5281/zenodo.23094151`, which resolves to
   the newest archived release, in a README badge, the APA and BibTeX
   citations, and `CITATION.cff`.
+- **Docker Hub image**: `egsuchanek/satprint`, built for `linux/amd64` and
+  `linux/arm64`. The install docs now start from `docker run` on that image.
+- **Container healthcheck** on `/api/health`, and a `.dockerignore`.
+
+### Changed
+
+- **The Docker image runs as an unprivileged user** (`satprint`, uid 1000), so
+  the tile cache volume now mounts at `/home/satprint/.cache/satprint` instead
+  of `/root/.cache/satprint`. Remove a volume made by the old image before
+  reusing it.
 
 ## [0.1.0] - 2026-10-02
 

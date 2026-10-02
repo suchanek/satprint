@@ -266,10 +266,15 @@ they are global tools, not dependencies. To build the docs site locally, run
 
 ## Docker
 
+A prebuilt image for `linux/amd64` and `linux/arm64` is on Docker Hub:
+
 ```bash
-docker build -t satprint .
-docker run -p 7417:7417 -v satprint-tiles:/root/.cache/satprint satprint
+docker run -d -p 7417:7417 -v satprint-tiles:/home/satprint/.cache/satprint egsuchanek/satprint
 ```
+
+Then open http://localhost:7417. See
+[Installation](https://suchanek.github.io/satprint/install/#with-docker) to
+build the image yourself.
 
 ## License
 

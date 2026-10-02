@@ -6,6 +6,11 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **On PyPI**: `pip install satprint`, first uploaded at 0.2.1. Tag pushes
+  now publish to PyPI through trusted publishing, after the GitHub Release.
+
 ## [0.2.1] - 2026-10-02
 
 ### Fixed

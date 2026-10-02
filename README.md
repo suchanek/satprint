@@ -9,6 +9,7 @@
 [![Docs](https://github.com/suchanek/satprint/actions/workflows/docs.yml/badge.svg)](https://suchanek.github.io/satprint/)
 [![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/suchanek/satprint/blob/main/LICENSE)
+[![PyPI](https://img.shields.io/pypi/v/satprint.svg)](https://pypi.org/project/satprint/)
 [![Version](https://img.shields.io/badge/version-0.2.1-blue.svg)](https://github.com/suchanek/satprint/releases)
 [![Poetry](https://img.shields.io/endpoint?url=https://python-poetry.org/badge/v0.json)](https://python-poetry.org/)
 [![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.23094151-blue.svg)](https://doi.org/10.5281/zenodo.23094151)
@@ -76,7 +77,14 @@ Mount Fuji from real elevation tiles, 120 mm wide, 1.2x exaggeration:
 
 ## Install
 
-satprint needs Python 3.12 or 3.13.
+satprint needs Python 3.12 or 3.13. It is on PyPI:
+
+```bash
+pipx install satprint            # or: pip install satprint
+pipx install "satprint[overture]"   # with the Overture Maps building source
+```
+
+From a clone, for development:
 
 ```bash
 git clone https://github.com/suchanek/satprint.git
@@ -84,7 +92,6 @@ cd satprint
 poetry install                   # add --extras geotiff for GeoTIFF georeferencing
 ```
 
-Without Poetry, `pip install -e .` in a virtual environment installs the app.
 See [Installation](https://suchanek.github.io/satprint/install/) for Docker.
 
 ## Run the web app

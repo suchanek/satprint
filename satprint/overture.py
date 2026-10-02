@@ -15,6 +15,7 @@ from __future__ import annotations
 
 import gzip
 import hashlib
+import importlib
 import json
 import os
 import re
@@ -48,7 +49,9 @@ _OSM_KIND = {"n": "node", "w": "way", "r": "relation"}
 
 def _client():
     try:
-        from overturemaps import core
+        # overturemaps is the optional `overture` extra. Imported by name so
+        # the type check passes with or without it installed.
+        core = importlib.import_module("overturemaps.core")
     except ImportError as exc:
         raise RuntimeError(
             'the Overture source needs the overture extra: pip install "satprint[overture]"'

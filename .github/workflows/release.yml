@@ -1,9 +1,15 @@
-# Publish a GitHub Release on tag push.
+# Publish a GitHub Release and a PyPI release on tag push.
 #
-# Pushing a `v*` tag builds the wheel and sdist and creates the Release from
-# release-notes.md, with both files attached. Zenodo archives every published
-# Release and mints a version DOI under the project's concept DOI, once the
-# repository is switched on in Zenodo's GitHub settings.
+# Pushing a `v*` tag builds the wheel and sdist, creates the Release from
+# release-notes.md with both files attached, and uploads the same two files to
+# PyPI. Zenodo archives every published Release and mints a version DOI under
+# the project's concept DOI.
+#
+# The PyPI upload uses trusted publishing (OIDC), so there is no API token in
+# the repository secrets. It is configured on PyPI under the project's
+# Publishing settings and must name this repository, the workflow file
+# `release.yml`, and the `pypi` environment below; change any of those three
+# and the upload stops.
 
 name: Release
 
@@ -46,6 +52,14 @@ jobs:
       - name: Build wheel and sdist
         run: poetry build
 
+      # Hand the built files to the publish job rather than letting it rebuild,
+      # so PyPI and the GitHub Release carry byte-identical artifacts.
+      - name: Stash dist for the publish job
+        uses: actions/upload-artifact@v7
+        with:
+          name: dist
+          path: dist/
+
       - name: Create GitHub Release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -53,3 +67,24 @@ jobs:
           gh release create "$GITHUB_REF_NAME" dist/* \
             --title "satprint $GITHUB_REF_NAME" \
             --notes-file release-notes.md
+
+  publish:
+    name: Publish to PyPI
+    needs: release
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/p/satprint
+    # Replaces the workflow-level `contents: write` for this job: publishing
+    # needs to mint an OIDC token and nothing else.
+    permissions:
+      id-token: write
+    steps:
+      - name: Fetch the artifacts the release job built
+        uses: actions/download-artifact@v8
+        with:
+          name: dist
+          path: dist/
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1

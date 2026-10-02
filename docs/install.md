@@ -15,14 +15,18 @@ poetry install --with dev
 Add `--extras geotiff` to read the georeferencing of uploaded GeoTIFFs with
 `rasterio`, and `--with docs` to build this site.
 
-## With pip
+## From PyPI
 
 To run the app without the development tooling:
 
 ```bash
-python -m venv .venv && source .venv/bin/activate
-pip install -e .                 # or: pip install -e ".[geotiff]"
+pipx install satprint                # or, in a virtual environment: pip install satprint
+pipx install "satprint[overture]"    # with the Overture Maps building source
+pipx install "satprint[geotiff]"     # to read GeoTIFF georeferencing
 ```
+
+From a clone without Poetry, `pip install -e .` in a virtual environment does
+the same.
 
 ## With Docker
 

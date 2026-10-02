@@ -6,6 +6,14 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.2.1] - 2026-10-02
+
+### Fixed
+
+- **README on PyPI**: the logo, screenshots and file links used repo-relative
+  paths, which PyPI cannot resolve. Images now load from the release's tag on
+  GitHub and file links point at the repository.
+
 ## [0.2.0] - 2026-10-02
 
 ### Added

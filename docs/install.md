@@ -34,7 +34,7 @@ docker run -d --name satprint -p 7417:7417 \
 ```
 
 Then open http://localhost:7417. Tags follow the release version
-(`egsuchanek/satprint:0.2.0`), and `latest` is the newest release.
+(`egsuchanek/satprint:0.2.1`), and `latest` is the newest release.
 
 - The volume keeps the downloaded tiles between runs.
 - The server runs as the unprivileged user `satprint` (uid 1000). A volume

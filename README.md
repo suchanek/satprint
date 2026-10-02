@@ -1,15 +1,15 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/brand/satprint-logo-dark.svg">
-    <img src="docs/brand/satprint-logo.svg" alt="satprint" width="460">
+    <img src="https://raw.githubusercontent.com/suchanek/satprint/v0.2.1/docs/brand/satprint-logo.svg" alt="satprint" width="460">
   </picture>
 </p>
 
 [![Tests](https://github.com/suchanek/satprint/actions/workflows/tests.yml/badge.svg)](https://github.com/suchanek/satprint/actions/workflows/tests.yml)
 [![Docs](https://github.com/suchanek/satprint/actions/workflows/docs.yml/badge.svg)](https://suchanek.github.io/satprint/)
 [![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue.svg)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
-[![Version](https://img.shields.io/badge/version-0.2.0-blue.svg)](https://github.com/suchanek/satprint/releases)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/suchanek/satprint/blob/main/LICENSE)
+[![Version](https://img.shields.io/badge/version-0.2.1-blue.svg)](https://github.com/suchanek/satprint/releases)
 [![Poetry](https://img.shields.io/endpoint?url=https://python-poetry.org/badge/v0.json)](https://python-poetry.org/)
 [![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.23094151-blue.svg)](https://doi.org/10.5281/zenodo.23094151)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://pre-commit.com/)
@@ -33,11 +33,11 @@ AWS Terrain Tiles        clamp sea, smooth,           terrain + walls + base
                                                       + land/water/border 3MF
 ```
 
-![satprint web UI](docs/screenshot.png)
+![satprint web UI](https://raw.githubusercontent.com/suchanek/satprint/v0.2.1/docs/screenshot.png)
 
 Mount Fuji from real elevation tiles, 120 mm wide, 1.2x exaggeration:
 
-![Mount Fuji preview](docs/fuji-preview.png)
+![Mount Fuji preview](https://raw.githubusercontent.com/suchanek/satprint/v0.2.1/docs/fuji-preview.png)
 
 ## Features
 
@@ -299,7 +299,7 @@ build the image yourself.
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](https://github.com/suchanek/satprint/blob/main/LICENSE).
 
 Map data: Terrain Tiles © Mapzen and AWS Open Data (SRTM, ASTER GDEM, GMTED2010,
 ETOPO1, NED, EU-DEM and others). Imagery © Esri, Maxar, Earthstar Geographics.
@@ -311,13 +311,13 @@ contributors, under the ODbL.
 
 If you use satprint in your research or project, please cite it:
 
-> Suchanek, E. G. (2026). *satprint: Satellite Terrain to 3D-Printable Models* (Version 0.2.0) [Software]. Flux-Frontiers. https://doi.org/10.5281/zenodo.23094151
+> Suchanek, E. G. (2026). *satprint: Satellite Terrain to 3D-Printable Models* (Version 0.2.1) [Software]. Flux-Frontiers. https://doi.org/10.5281/zenodo.23094151
 
 ```bibtex
 @software{suchanek_satprint,
   author    = {Suchanek, Eric G.},
   title     = {{satprint}: Satellite Terrain to 3D-Printable Models},
-  version   = {0.2.0},
+  version   = {0.2.1},
   year      = {2026},
   publisher = {Flux-Frontiers},
   url       = {https://github.com/suchanek/satprint},
@@ -326,5 +326,5 @@ If you use satprint in your research or project, please cite it:
 ```
 
 The DOI is the Zenodo concept DOI, which always resolves to the newest
-archived release. The citation metadata is also in [CITATION.cff](CITATION.cff). See the
-[changelog](CHANGELOG.md) for release history.
+archived release. The citation metadata is also in [CITATION.cff](https://github.com/suchanek/satprint/blob/main/CITATION.cff). See the
+[changelog](https://github.com/suchanek/satprint/blob/main/CHANGELOG.md) for release history.

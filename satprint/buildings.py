@@ -360,13 +360,16 @@ def _prism(
     z_top: float,
     profile: Profile = (),
     roof_mm: float = 0.0,
+    hole_top: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
     """Closed prism over ``poly``: (vertices, roof faces, wall+floor faces).
 
     With a ``profile`` the flat roof is replaced by rings of the exterior
     scaled toward the centroid, rising ``roof_mm`` above ``z_top``. The
-    caller makes sure ``poly`` has no holes and is star-shaped about its
-    centroid.
+    caller makes sure ``poly`` is star-shaped about its centroid. A shaped
+    roof may have one hole, for what stands on it: then the profile stops
+    short of the apex, its last ring is joined to the hole's edge at
+    ``hole_top``, and the hole's walls run from there down to the floor.
     """
     poly = orient(poly, sign=1.0)  # exterior CCW, holes CW
     rings = [np.asarray(poly.exterior.coords)[:-1]] + [
@@ -405,29 +408,37 @@ def _prism(
         walls.append(np.column_stack([b0, t1, t0]))
         start += k
     floor = roof_f[:, ::-1] + n
+    k = rings[0].shape[0]
+    top_z = np.full(n, z_top)
+    if hole_top is not None:
+        top_z[k:] = hole_top
     vertices = [
-        np.column_stack([ring_xy, np.full(n, z_top)]),
+        np.column_stack([ring_xy, top_z]),
         np.column_stack([ring_xy, np.full(n, z_bottom)]),
     ]
     if profile:
-        roof_f = _profile_faces(poly, ring_xy, z_top, profile, roof_mm, vertices)
+        roof_f = _profile_faces(poly, ring_xy, k, z_top, profile, roof_mm, vertices)
+        if roof_f is None:
+            return None
     return np.vstack(vertices), roof_f, np.vstack(walls + [floor])
 
 
 def _profile_faces(
     poly: Polygon,
     ring_xy: np.ndarray,
+    k: int,
     z_top: float,
     profile: Profile,
     roof_mm: float,
     vertices: list[np.ndarray],
-) -> np.ndarray:
-    """Faces of a shaped roof over the exterior ring (indices ``0..k-1``),
-    appending its new vertices to ``vertices``."""
-    k = ring_xy.shape[0]
-    c = np.asarray(poly.centroid.coords[0])
+) -> np.ndarray | None:
+    """Faces of a shaped roof over the exterior ring (top indices ``0..k-1``),
+    appending its new vertices to ``vertices``. Without an apex, the last
+    ring is joined to the hole (top indices ``k..``)."""
+    ext = ring_xy[:k]
+    c = np.asarray(Polygon(ext).centroid.coords[0])
     nxt = sum(v.shape[0] for v in vertices)
-    prev = np.arange(k)
+    prev, prev_xy = np.arange(k), ext
     roll = (np.arange(k) + 1) % k
     faces = []
     for scale, frac in profile:
@@ -435,16 +446,32 @@ def _profile_faces(
         if scale <= 1e-9:
             vertices.append(np.array([[c[0], c[1], z]]))
             faces.append(np.column_stack([prev, prev[roll], np.full(k, nxt)]))
-            break
-        ring = c + (ring_xy - c) * scale
+            return np.vstack(faces)
+        ring = c + (ext - c) * scale
         vertices.append(np.column_stack([ring, np.full(k, z)]))
         cur = nxt + np.arange(k)
         faces.append(np.column_stack([prev, prev[roll], cur[roll]]))
         faces.append(np.column_stack([prev, cur[roll], cur]))
-        prev = cur
+        prev, prev_xy = cur, ring
         nxt += k
-    else:
+    if not poly.interiors:
         raise ValueError("a roof profile must end at an apex (scale 0)")
+    # The flat ring between the last ring and the hole.
+    hole = ring_xy[k:]
+    index = {
+        (float(x), float(y)): int(i) for (x, y), i in zip(prev_xy, prev, strict=True)
+    }
+    index.update({(float(x), float(y)): k + i for i, (x, y) in enumerate(hole)})
+    for tri in shapely.constrained_delaunay_triangles(Polygon(prev_xy, [hole])).geoms:
+        pts = np.asarray(tri.exterior.coords)[:3]
+        try:
+            ids = [index[(float(x), float(y))] for x, y in pts]
+        except KeyError:
+            return None
+        a, b, d = pts
+        if (b[0] - a[0]) * (d[1] - a[1]) - (b[1] - a[1]) * (d[0] - a[0]) < 0:
+            ids = [ids[0], ids[2], ids[1]]
+        faces.append(np.asarray([ids], dtype=np.int64))
     return np.vstack(faces)
 
 
@@ -522,10 +549,10 @@ def building_mesh(
     # A shaped roof starts no lower than the flat roofs it stands among, so
     # a dome set into a taller wing is not left in a pit; if too little of
     # it shows, it is printed flat. Only footprints at least half its size
-    # count: smaller ones overlapping it, such as a lantern mapped on top
-    # of a dome, are ornaments and give way to it. Then the tallest shaped
-    # solid keeps its roof, a lower shaped one it reaches into goes flat,
-    # and flat footprints give up the area under every shaped one.
+    # count. Smaller ones standing on it, such as a lantern on a dome, get a
+    # hole cut for them (:func:`_lantern_hole`). The largest shaped solid
+    # keeps its roof, one that reaches into it outside such a hole goes
+    # flat, and flat footprints give up the area under every shaped one.
     flat_tree = STRtree([p for p, _ in footprints])
     raised = []
     for poly, eave, profile, roof_mm in shaped:
@@ -541,27 +568,53 @@ def building_mesh(
             raised.append((poly, eave, profile, top - eave))
         else:
             footprints.append((poly, top))
-    raised.sort(key=lambda s: -(s[1] + s[3]))
-    solids: list[tuple[Polygon, float, Profile, float]] = []
+    # A roof standing on a larger one goes after it; otherwise tallest first.
+    inner = [r[0].buffer(-simplify_mm) for r in raised]
+    depth = [
+        sum(
+            r[0].area < 0.5 * o[0].area and inner[j].covers(r[0])
+            for j, o in enumerate(raised)
+        )
+        for r in raised
+    ]
+    order = sorted(
+        range(len(raised)), key=lambda i: (depth[i], -(raised[i][1] + raised[i][3]))
+    )
+    raised = [raised[i] for i in order]
+    # (polygon, height or eave, profile, roof height, hole top or None)
+    solids: list[tuple[Polygon, float, Profile, float, float | None]] = []
     taken = Polygon()
-    for poly, eave, profile, roof_mm in raised:
+    for n, (poly, eave, profile, roof_mm) in enumerate(raised):
         widest = max(1.0, *(s for s, _ in profile))  # onions bulge out
         reach = affinity.scale(poly, widest, widest, origin=poly.centroid)
         if taken.intersection(reach).area > min_area_mm2:
             rest = shapely.make_valid(poly.difference(taken))
             footprints.extend((p, eave + roof_mm) for p in _polygons(rest))
-        else:
-            solids.append((poly, eave, profile, roof_mm))
+            continue
+        # what could stand on it: smaller flat footprints, and smaller shaped
+        # ones by their eave, the lowest point of their top
+        standing = [(p, h) for p, h in footprints] + [
+            (p, e) for p, e, _, _ in raised[n + 1 :]
+        ]
+        cut = _lantern_hole(poly, eave, profile, roof_mm, standing, simplify_mm)
+        if cut is None:
+            solids.append((poly, eave, profile, roof_mm, None))
             taken = taken.union(reach)
+        else:
+            hole, kept, hole_top = cut
+            solids.append(
+                (Polygon(poly.exterior, [hole.exterior]), eave, kept, roof_mm, hole_top)
+            )
+            taken = taken.union(reach.difference(hole))
     if not taken.is_empty:
         footprints = [
             (p, h)
             for fp, h in footprints
             for p in _polygons(shapely.make_valid(fp.difference(taken)))
         ]
-    solids += [(p, h, (), 0.0) for p, h in resolve_overlaps(footprints)]
+    solids += [(p, h, (), 0.0, None) for p, h in resolve_overlaps(footprints)]
 
-    for poly, h_mm, profile, roof_mm in solids:
+    for poly, h_mm, profile, roof_mm, hole_top in solids:
         if poly.area < min_area_mm2:
             continue
         ring_pts = np.vstack(
@@ -575,6 +628,7 @@ def building_mesh(
             float(ground.max()) + h_mm,
             profile,
             roof_mm,
+            None if hole_top is None else float(ground.max()) + hole_top,
         )
         if prism is None:
             continue
@@ -604,6 +658,69 @@ def _star_shaped(poly: Polygon) -> bool:
     return all(
         grown.covers(LineString([c, p])) for p in list(poly.exterior.coords)[:-1]
     )
+
+
+def _lantern_hole(
+    poly: Polygon,
+    eave: float,
+    profile: Profile,
+    roof_mm: float,
+    standing: list[tuple[Polygon, float]],
+    margin: float,
+) -> tuple[Polygon, Profile, float] | None:
+    """Where a shaped roof makes room for what stands on it.
+
+    Footprints less than half the roof's size, inside it and rising above
+    its eave, such as a lantern, a finial or a statue on a dome, would pass
+    through the roof. Instead the roof stops at the highest ring that still
+    encloses them, a flat ring joins it to their outline, and they stand in
+    the hole that leaves, from the ground up, touching the roof only along
+    the hole's walls. Those that stay below that ring are dropped from the
+    hole and end up inside the roof.
+
+    :param poly: the roof's footprint, star-shaped, no holes.
+    :param eave: eave height above the ground.
+    :param profile: the roof's rings, ending at the apex.
+    :param roof_mm: roof height.
+    :param standing: (footprint, lowest top) of everything that could
+        stand on it.
+    :param margin: clearance between the hole and the ring that encloses it.
+    :return: (hole, the profile up to that ring, the ring's height above
+        the ground), or None when nothing stands on it or the hole is not a
+        single outline.
+    """
+    inner = poly.buffer(-margin)
+    members = [
+        (p, h)
+        for p, h in standing
+        if p.area < 0.5 * poly.area and h > eave and inner.covers(p)
+    ]
+    # finer rings than the profile's, so the cut can sit close to the hole
+    steps: list[tuple[float, float]] = []
+    prev = (1.0, 0.0)
+    for point in profile:
+        for i in range(1, 9):
+            t = i / 8
+            steps.append(
+                (prev[0] + (point[0] - prev[0]) * t, prev[1] + (point[1] - prev[1]) * t)
+            )
+        prev = point
+    c = poly.centroid
+    while members:
+        hole = unary_union([p for p, _ in members])
+        if not isinstance(hole, Polygon) or hole.interiors:
+            return None
+        last = -1
+        for i, (scale, _) in enumerate(steps):
+            ring = affinity.scale(poly, scale, scale, origin=c)
+            if scale > 1e-9 and ring.buffer(-margin).contains(hole):
+                last = i
+        top = eave + (steps[last][1] * roof_mm if last >= 0 else 0.0)
+        low = [m for m in members if m[1] < top - 1e-6]
+        if not low:
+            return orient(hole, sign=-1.0), tuple(steps[: last + 1]), top
+        members = [m for m in members if m[1] >= top - 1e-6]
+    return None
 
 
 def resolve_overlaps(

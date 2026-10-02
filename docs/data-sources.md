@@ -29,9 +29,13 @@ of the same area downloads nothing.
   from its center, and must stand at least 0.3 mm tall in the model. Otherwise
   the building is flat at its full height.
 - A shaped roof starts no lower than the flat roofs at least half its size that
-  it overlaps, so a dome set into a taller wing does not sit in a pit. Smaller
-  footprints overlapping it, such as a lantern on a dome, are left out. Of two
-  overlapping shaped roofs, the taller keeps its shape and the other is flat.
+  it overlaps, so a dome set into a taller wing does not sit in a pit.
+- Smaller parts standing on a shaped roof, such as a lantern, cupola or statue
+  on a dome, keep their place: the roof stops at the highest ring that still
+  encloses them, and they stand in the hole that leaves. A part that would not
+  reach that ring ends up inside the roof.
+- Of two overlapping shaped roofs that are not standing on each other, the
+  taller keeps its shape and the other is flat.
 - The OpenFreeMap tiles carry no roof tags, so a small Overpass query fetches
   the shaped buildings in the area and they replace their copies from the
   tiles. If that query fails, the roofs are flat and the build reports

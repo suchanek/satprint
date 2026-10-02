@@ -518,3 +518,66 @@ def test_demoted_dome_is_still_printed():
     # the small dome's part outside the big one stays, flat
     assert both.count == 2
     assert both.as_mesh().volume_mm3() > only_big.as_mesh().volume_mm3()
+
+
+def test_lantern_stands_in_a_hole_in_the_dome():
+    dome = way(
+        _octagon(40.005, -73.995),
+        **{
+            "building:part": "yes",
+            "height": "60",
+            "roof:shape": "dome",
+            "roof:height": "20",
+        },
+    )
+    lantern = way(
+        _octagon(40.005, -73.995, 0.0001),
+        **{"building:part": "yes", "height": "75"},
+    )
+    cupola = way(  # a small dome on the lantern, taller than the big one
+        _octagon(40.005, -73.995, 0.00005),
+        **{"building:part": "yes", "height": "85", "roof:shape": "dome"},
+    )
+    relief, width, depth, mm_per_m = _block()
+    found = buildings_from_osm({"elements": [dome, lantern, cupola]})
+    bm = building_mesh(found, BBOX, relief, width, depth, 3.0, mm_per_m)
+    assert bm.count == 3
+    assert check_watertight(bm.as_mesh())["watertight"]
+    z = bm.vertices[:, 2]
+    # the cupola keeps its dome: a single apex at 85 m
+    assert z.max() == pytest.approx(3.0 + 85 * mm_per_m, rel=1e-4)
+    assert (z == z.max()).sum() == 1  # the main dome is cut, no apex
+    # the main dome is still shaped below its cut: rings between its eave
+    # and the lantern's top
+    eave, top = 3.0 + 40 * mm_per_m, 3.0 + 60 * mm_per_m
+    assert len(np.unique(np.round(z[(z > eave + 1e-3) & (z < top)], 4))) > 5
+    # the solids fill the hole without passing through each other
+    alone = [
+        building_mesh([b], BBOX, relief, width, depth, 3.0, mm_per_m) for b in found[:2]
+    ]
+    v = bm.as_mesh().volume_mm3()
+    assert alone[0].as_mesh().volume_mm3() < v
+    assert v < sum(a.as_mesh().volume_mm3() for a in alone)
+
+
+def test_lantern_below_the_cut_is_left_inside_the_dome():
+    dome = way(
+        _octagon(40.005, -73.995),
+        **{
+            "building:part": "yes",
+            "height": "60",
+            "roof:shape": "dome",
+            "roof:height": "20",
+        },
+    )
+    stub = way(
+        _octagon(40.005, -73.995, 0.0001),
+        **{"building:part": "yes", "height": "45"},  # above the eave only
+    )
+    relief, width, depth, mm_per_m = _block()
+    found = buildings_from_osm({"elements": [dome, stub]})
+    bm = building_mesh(found, BBOX, relief, width, depth, 3.0, mm_per_m)
+    assert bm.count == 1
+    assert check_watertight(bm.as_mesh())["watertight"]
+    z = bm.vertices[:, 2]
+    assert (z == z.max()).sum() == 1

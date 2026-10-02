@@ -220,8 +220,9 @@ curl -s localhost:7417/api/model -H 'content-type: application/json' -d '{
   height from the footprint's size. Other roofs are flat. The vector tiles
   carry no roof tags, so a small Overpass query adds them; if it fails, the
   roofs are flat and the build says so. A shaped roof starts no lower than the
-  larger flat roofs around it, and smaller parts overlapping it, such as a
-  lantern on a dome, are left out so the solids never pass through each other.
+  larger flat roofs around it, and smaller parts standing on it, such as a
+  lantern on a dome, stand in a hole cut in the roof, so the solids never pass
+  through each other.
 - **Landmarks.** A few buildings that roof tags cannot describe are replaced by
   exact shapes from published dimensions: so far the Sphere in Las Vegas, a
   157 m sphere cut by the ground at 112 m.

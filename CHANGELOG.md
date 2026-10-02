@@ -17,7 +17,8 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 - **Roof shapes**: roofs tagged `roof:shape` dome, onion, cone or pyramidal
   are built with that shape, with the height from `roof:height` or
-  `roof:levels`. The OpenFreeMap tiles carry no roof tags, so a small Overpass
+  `roof:levels`. Lanterns, cupolas and statues mapped on a dome stand in a
+  hole cut in it. The OpenFreeMap tiles carry no roof tags, so a small Overpass
   query adds them; if it fails the roofs stay flat and the build reports
   `building_warning`.
 - **Landmarks**: exact shapes for buildings that roof tags cannot describe,

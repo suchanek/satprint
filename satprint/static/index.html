@@ -8,6 +8,16 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 <link rel="stylesheet" href="/static/style.css">
+<script>
+// Before first paint, so a light page does not flash dark: the saved choice,
+// else the system's.
+(function () {
+  var t = null;
+  try { t = localStorage.getItem("satprint-theme"); } catch (e) {}
+  if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  document.documentElement.dataset.theme = t;
+})();
+</script>
 <script type="importmap">
 { "imports": {
     "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
@@ -20,11 +30,13 @@
   <div class="brand">
     <img class="logo" src="/static/satprint-mark.svg" alt="" width="44" height="41">
     <div>
-      <h1>satprint</h1>
+      <h1>satprint <a id="version" class="version" href="https://github.com/suchanek/satprint/releases" target="_blank" rel="noopener" title="Release notes" hidden></a></h1>
       <p>Pick a place on Earth. Get a 3D-printable terrain model.</p>
     </div>
   </div>
   <nav>
+    <button id="theme-toggle" type="button" aria-label="Switch between light and dark theme"></button>
+    <a href="https://suchanek.github.io/satprint/" target="_blank" rel="noopener">Docs</a>
     <a href="/docs" target="_blank" rel="noopener">API</a>
   </nav>
 </header>
@@ -33,6 +45,9 @@
   <!-- ───────── 1. Area ───────── -->
   <section class="panel" id="panel-area">
     <h2><span class="step">1</span> Choose an area</h2>
+    <label class="presets">Start from an example
+      <select id="presets"><option value="">Choose a city, landmark or landscape...</option></select>
+    </label>
     <form id="search-form" class="search" role="search" onsubmit="return false">
       <input type="search" id="search-q" placeholder="Search a place: city, landmark, mountain, address" aria-label="Search a place" minlength="2" maxlength="200">
       <button id="btn-search" type="submit">Search</button>
@@ -40,15 +55,14 @@
     </form>
     <div class="toolbar">
       <button id="btn-draw" class="primary" type="button">Draw rectangle</button>
-      <select id="presets"><option value="">Presets…</option></select>
       <label class="switch"><input type="checkbox" id="basemap-toggle" checked> Satellite imagery</label>
     </div>
     <div id="map" role="application" aria-label="map"></div>
     <div class="bbox-grid">
-      <label>South <input type="number" id="south" step="0.0001" value="45.93"></label>
-      <label>West <input type="number" id="west" step="0.0001" value="7.58"></label>
-      <label>North <input type="number" id="north" step="0.0001" value="46.02"></label>
-      <label>East <input type="number" id="east" step="0.0001" value="7.72"></label>
+      <label>South <input type="number" id="south" step="0.0001" value="38.6157"></label>
+      <label>West <input type="number" id="west" step="0.0001" value="-90.1963"></label>
+      <label>North <input type="number" id="north" step="0.0001" value="38.6337"></label>
+      <label>East <input type="number" id="east" step="0.0001" value="-90.1733"></label>
     </div>
     <p class="hint" id="area-hint"></p>
 
@@ -84,6 +98,7 @@
       <label class="switch"><input type="checkbox" id="clamp" checked> Flatten sea / below-sea-level areas</label>
       <label class="switch"><input type="checkbox" id="texture" checked> Drape satellite imagery (GLB, satellite elevation only)</label>
       <label class="switch"><input type="checkbox" id="buildings"> Add buildings from OpenStreetMap (areas up to 40 km²)</label>
+      <label class="switch"><input type="checkbox" id="bridges"> Add bridges over water from OpenStreetMap (areas up to 40 km²)</label>
       <label class="switch"><input type="checkbox" id="multicolor"> Multi-color 3MF: land, water, buildings and border as separate parts (multi-material printers)</label>
       <label>Border frame <span class="unit">mm wide, 0 = none</span>
         <input type="number" id="frame_mm" min="0" max="30" step="0.5" value="0"></label>

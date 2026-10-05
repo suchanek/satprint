@@ -18,6 +18,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
 from . import __version__
+from .bridges import bridge_mesh, bridges_from_vector_tiles
 from .buildings import (
     MAX_BUILDING_AREA_KM2,
     BuildingMesh,
@@ -28,6 +29,7 @@ from .mesh import (
     Mesh,
     frame_mesh,
     heightmap_to_mesh,
+    merge_building_meshes,
     merge_meshes,
     write_3mf,
     write_binary_stl,
@@ -57,7 +59,7 @@ from .terrain import (
     prepare_relief,
     synthetic_heightmap,
 )
-from .water import multicolor_parts, water_from_vector_tiles, water_zoom
+from .water import level_water, multicolor_parts, water_from_vector_tiles, water_zoom
 
 STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
 
@@ -130,6 +132,7 @@ terrain_cache = _LRU(32)  # key -> Heightmap   (downloads are the slow part)
 imagery_cache = _LRU(16)  # bbox key -> (JPEG bytes, meta)
 water_cache = _LRU(16)  # bbox key -> list of water polygons
 buildings_cache = _LRU(16)  # bbox key -> list[Building]
+bridges_cache = _LRU(16)  # bbox key -> (bridge features, water polygons)
 upload_store = _LRU(16)  # upload_id -> Heightmap
 model_store = _LRU(32)  # model_id -> StoredModel
 
@@ -176,6 +179,13 @@ class ModelRequest(BaseModel):
         description="OpenFreeMap vector tiles (fast, rebuilt weekly), Overpass "
         "(latest OSM edits, slower), Overture Maps (OSM plus Microsoft and "
         "Google footprints; needs the overture extra), or auto: OpenFreeMap, then Overpass",
+    )
+    bridges: bool = Field(
+        False,
+        description="add OpenStreetMap bridges over water (terrarium source only)",
+    )
+    bridge_piers_mm: float = Field(
+        20.0, ge=0, le=1000, description="longest distance between piers; 0 = none"
     )
     frame_mm: float = Field(
         0.0, ge=0, le=30, description="border frame width around the model; 0 = none"
@@ -232,6 +242,18 @@ def create_app(
             )
             hit = water_from_vector_tiles(tiles)
             water_cache.put(key, hit)
+        return hit
+
+    def _bridges_for(
+        bbox: BBox, progress: Progress | None = None
+    ) -> tuple[tuple[list, list], list]:
+        """Bridge outlines and lines, and the water polygons, in ``bbox``."""
+        key = _bbox_key(bbox)
+        hit = bridges_cache.get(key)
+        if hit is None:
+            tiles = vtiles.tiles(bbox, progress=progress, stage="bridges")
+            hit = (bridges_from_vector_tiles(tiles), water_from_vector_tiles(tiles))
+            bridges_cache.put(key, hit)
         return hit
 
     geo = geocoder or Geocoder()
@@ -328,6 +350,18 @@ def create_app(
                 raise HTTPException(404, str(exc)) from exc
             except Exception as exc:  # network / decode failures
                 raise HTTPException(502, f"elevation download failed: {exc}") from exc
+            try:  # data over water is noisy; levelling refines it, so a failure keeps it
+                hm = level_water(
+                    hm,
+                    vtiles.tiles(
+                        bbox,
+                        progress=progress,
+                        zoom=water_zoom(bbox),
+                        stage="water",
+                    ),
+                )
+            except Exception:
+                pass
             terrain_cache.put(key, hm)
         return hm
 
@@ -450,6 +484,41 @@ def create_app(
                     if bmesh.count:
                         top = float(bmesh.vertices[:, 2].max())
                         info["height_mm"] = max(info["height_mm"], top)
+        if req.bridges and hm.bbox is not None:
+            area = bbox_area_km2(hm.bbox)
+            # A bridge failure should not cost the STL either.
+            if area > MAX_BUILDING_AREA_KM2:
+                building_info["bridge_error"] = (
+                    f"area is {area:.0f} km2; bridges are limited to "
+                    f"{MAX_BUILDING_AREA_KM2:.0f} km2"
+                )
+            else:
+                try:
+                    features, water = _bridges_for(hm.bbox, progress)
+                except Exception as exc:
+                    building_info["bridge_error"] = f"bridge download failed: {exc}"
+                else:
+                    if progress:
+                        progress("bridge mesh", 0, 0)
+                    brmesh = bridge_mesh(
+                        *features,
+                        water,
+                        hm.bbox,
+                        relief,
+                        info["width_mm"],
+                        info["depth_mm"],
+                        params.base_mm,
+                        info["mm_per_m_plan"],
+                        pier_spacing_mm=req.bridge_piers_mm,
+                    )
+                    building_info["bridges"] = brmesh.count
+                    if brmesh.count:
+                        top = float(brmesh.vertices[:, 2].max())
+                        info["height_mm"] = max(info["height_mm"], top)
+                        bmesh = merge_building_meshes(
+                            *(m for m in (bmesh, brmesh) if m)
+                        )
+        credit = building_info.get("building_attribution", OSM_ATTRIBUTION)
         if progress:
             progress("writing files", 0, 0)
         solid = merge_meshes(body, bmesh.as_mesh()) if bmesh and bmesh.count else body
@@ -478,7 +547,7 @@ def create_app(
             )
             sources = [OSM_ATTRIBUTION] if polygons else []
             if bmesh and bmesh.count:
-                sources.append(building_info["building_attribution"])
+                sources.append(credit)
             credits = "; ".join(dict.fromkeys(sources)) or None
             threemf = write_3mf(parts, name=req.name, attribution=credits)
             multicolor_info.update(
@@ -499,7 +568,7 @@ def create_app(
             else:
                 credits = IMAGERY_ATTRIBUTION
                 if bmesh and bmesh.count:
-                    credits += "; " + building_info["building_attribution"]
+                    credits += "; " + credit
                 glb = write_glb(
                     body,
                     rows,

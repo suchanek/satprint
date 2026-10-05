@@ -60,6 +60,18 @@ These need `--bbox`.
 | `--building-scale X` | 1 | Building height multiplier; 1 is true proportion |
 | `--building-source` | `openfreemap` | `openfreemap` (fast, rebuilt weekly), `overpass` (latest edits, slower) or `overture` (OSM plus Microsoft and Google footprints; needs the `overture` extra) |
 
+### Bridges
+
+These need `--bbox` and the same area limit as buildings, and work with or
+without `--buildings`.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--bridges` | off | Add OpenStreetMap bridges over water as raised decks |
+| `--bridge-piers MM` | 20 | Longest distance between piers along a bridge; 0 for none |
+
+The build reports the number of bridges as `bridges`.
+
 ### Output
 
 | Option | Meaning |
@@ -82,6 +94,9 @@ satprint build --bbox 36.02 -112.25 36.20 -111.95 --relief 15 --smoothing 1 \
 # Midtown Manhattan with buildings, plus a textured GLB
 satprint build --bbox 40.7414 -73.9997 40.7684 -73.9683 --width 150 \
                --buildings --glb midtown.glb -o midtown.stl
+
+# The Golden Gate Bridge, with piers at most 20 mm apart
+satprint build --bbox 37.805 -122.490 37.835 -122.465 --bridges -o golden-gate.stl
 
 # Venice as a four-color 3MF: land, water, buildings and a 5 mm border frame
 satprint build --bbox 45.43 12.32 45.446 12.343 --buildings --frame 5 \

@@ -36,7 +36,8 @@ AWS Terrain Tiles        clamp sea, smooth,           terrain + walls + base
 
 ![satprint web UI](https://raw.githubusercontent.com/suchanek/satprint/v0.2.1/docs/screenshot.png)
 
-Mount Fuji from real elevation tiles, 120 mm wide, 1.2x exaggeration:
+Mount Fuji from real elevation tiles, 120 mm wide with a 5 mm frame, 1.5x
+exaggeration:
 
 ![Mount Fuji preview](https://raw.githubusercontent.com/suchanek/satprint/v0.2.1/docs/fuji-preview.png)
 
@@ -61,6 +62,8 @@ Mount Fuji from real elevation tiles, 120 mm wide, 1.2x exaggeration:
   A few landmarks, such as the Sphere in Las Vegas, get exact shapes. Heights
   are in true proportion by default, with a multiplier. OpenFreeMap, Overpass
   or Overture Maps.
+- **Bridges** over water from OpenStreetMap, as a raised deck on evenly spaced
+  piers, in the STL, GLB and 3MF. Deck heights are estimated from the banks.
 - **Multi-color 3MF.** Land, water, buildings and an optional border frame are
   separate parts of one object, already on filaments 1 to 4 in Bambu Studio.
   Water is the OSM sea, rivers and lakes, plus the flattened sea.
@@ -69,8 +72,8 @@ Mount Fuji from real elevation tiles, 120 mm wide, 1.2x exaggeration:
 - **Textured GLB.** Satellite imagery draped over the terrain and the roofs,
   for viewing in Blender, macOS Quick Look or a web viewer. The web preview
   shows it.
-- **Search and presets.** Search any place by name, or pick one of 67 presets:
-  37 cities and landmarks, which turn buildings on, and 30 mountains and
+- **Search and presets.** Search any place by name, or pick one of 70 presets:
+  40 cities and landmarks, which turn buildings on, and 30 mountains and
   landscapes.
 - **Web app, CLI and REST API.** Builds run as background jobs, and the page
   shows each stage with tile counts. Interactive API docs are at `/docs`.
@@ -102,7 +105,9 @@ satprint serve --host 0.0.0.0 --port 7417
 ```
 
 1. **Choose an area.** Search for a place, pick a preset, click **Draw
-   rectangle** and drag on the map, or type the bounds. The hint line shows the
+   rectangle** and drag on the map, or type the bounds. Dragging the map
+   afterwards slides it under the rectangle, so you can move the area without
+   redrawing it. The hint line shows the
    real size of the area and the model it makes.
 2. **Set the print.** Model width, base thickness, vertical exaggeration
    (1.5x to 3x reads well for most landscapes; 1x is true scale) or a fixed
@@ -153,6 +158,9 @@ satprint build --bbox 36.02 -112.25 36.20 -111.95 --relief 15 --smoothing 1 \
 satprint build --bbox 40.7414 -73.9997 40.7684 -73.9683 --width 150 \
                --buildings --glb midtown.glb -o midtown.stl
 
+# The Golden Gate Bridge, with piers at most 20 mm apart
+satprint build --bbox 37.805 -122.490 37.835 -122.465 --bridges -o golden-gate.stl
+
 # Venice as a four-color 3MF: land, water, buildings and a 5 mm border frame
 satprint build --bbox 45.43 12.32 45.446 12.343 --buildings --frame 5 \
                --3mf venice.3mf -o venice.stl
@@ -200,6 +208,8 @@ curl -s localhost:7417/api/model -H 'content-type: application/json' -d '{
   `exaggeration = 1` is a true-scale model. With `relief_mm` set, the vertical
   scale puts the highest point exactly that far above the base, and the
   effective exaggeration is reported back.
+- **Lakes.** Water bodies are set to the lower shore of their outline, since
+  elevation data over water is noisy and can print a lake as a raised plateau.
 - **Sea level.** Samples below 0 m (bathymetry in the source data) are clamped
   to 0 by default, so coastlines print as a flat plane.
 - **Buildings** use the plan scale for their heights, so `building_scale = 1`
@@ -211,7 +221,7 @@ curl -s localhost:7417/api/model -H 'content-type: application/json' -d '{
 |---|---|---|
 | Elevation | [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) | `~/.cache/satprint/tiles` |
 | Imagery (GLB texture) | Esri World Imagery | `~/.cache/satprint/imagery` |
-| Buildings and water | [OpenFreeMap](https://openfreemap.org) vector tiles, zoom 14, rebuilt from OSM about weekly | `~/.cache/satprint/vtiles` |
+| Buildings, bridges and water | [OpenFreeMap](https://openfreemap.org) vector tiles, zoom 14, rebuilt from OSM about weekly | `~/.cache/satprint/vtiles` |
 | Buildings, fallback; roof shapes | [Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API), 0.01° tiles | `~/.cache/satprint/osm` |
 | Buildings, optional | [Overture Maps](https://overturemaps.org) GeoParquet on S3, per release | `~/.cache/satprint/overture` |
 | Place search | [Nominatim](https://nominatim.org), one request per second | in memory |
@@ -222,6 +232,13 @@ curl -s localhost:7417/api/model -H 'content-type: application/json' -d '{
   when sliced. Areas are limited to 40 km² with buildings on, and very small
   footprints are dropped. A building that crosses a vector-tile edge arrives as
   two solids that meet at the edge.
+- **Bridges.** Only bridges over water are built, from the OSM bridge outlines
+  and bridge-tagged road, rail and path lines. Each is cut to the water plus a
+  landing of about 30 m on each bank. OSM has no deck heights, so a landing is
+  flat at the highest ground under it, and the deck blends the landings'
+  heights over the water, at least 1 mm above it. The span is a thin slab, open
+  underneath, on piers at even spacing; they are not the real piers, and there
+  are no towers or cables. Areas are limited to 40 km², as with buildings.
 - **Roof shapes.** Roofs tagged `roof:shape` dome, onion, cone or pyramidal
   get that shape, from `roof:height` or `roof:levels`, else a hemisphere-like
   height from the footprint's size. Other roofs are flat. The vector tiles
@@ -231,8 +248,12 @@ curl -s localhost:7417/api/model -H 'content-type: application/json' -d '{
   lantern on a dome, stand in a hole cut in the roof, so the solids never pass
   through each other.
 - **Landmarks.** A few buildings that roof tags cannot describe are replaced by
-  exact shapes from published dimensions: so far the Sphere in Las Vegas, a
-  157 m sphere cut by the ground at 112 m.
+  exact shapes from published dimensions: the Sphere in Las Vegas, a 157 m
+  sphere cut by the ground at 112 m, and, as meshes with open archways and
+  separate legs, the Gateway Arch, the Eiffel Tower, the Space Needle and Christ the
+  Redeemer. The
+  Arch, the Needle's saucer and the Eiffel Tower's archways are overhangs that
+  may want slicer supports.
 - **Overture Maps.** Choose it with "Building data" or
   `--building-source overture`. It merges OSM with Microsoft and Google
   footprints, so it finds buildings OSM lacks, and keeps the roof tags. It
@@ -268,7 +289,8 @@ satprint/
   terrain.py    elevation sources (terrain tiles, synthetic, file), imagery, scaling, hillshade
   mesh.py       heightmap to watertight solid, land/water split, frame, STL, GLB and 3MF writers
   buildings.py  OSM buildings to closed solids on the terrain, roof shapes
-  landmarks.py  exact shapes for a few landmarks
+  bridges.py    OSM bridges over water to decks on piers
+  landmarks.py  exact shapes and meshes for a few landmarks
   overture.py   Overture Maps building source (overture extra)
   water.py      water map and the multi-color 3MF parts
   osm.py        OpenFreeMap, Overpass and Nominatim clients
@@ -310,8 +332,8 @@ MIT. See [LICENSE](https://github.com/suchanek/satprint/blob/main/LICENSE).
 
 Map data: Terrain Tiles © Mapzen and AWS Open Data (SRTM, ASTER GDEM, GMTED2010,
 ETOPO1, NED, EU-DEM and others). Imagery © Esri, Maxar, Earthstar Geographics.
-Street map, buildings, water and search © OpenStreetMap contributors, under the
-ODbL. Overture buildings © Overture Maps Foundation and OpenStreetMap
+Street map, buildings, bridges, water and search © OpenStreetMap contributors,
+under the ODbL. Overture buildings © Overture Maps Foundation and OpenStreetMap
 contributors, under the ODbL.
 
 ## Citation

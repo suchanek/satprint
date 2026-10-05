@@ -36,3 +36,4 @@ build/
 .mcp.json.sav
 # === end KG generated artifacts ===
 site/
+renders/

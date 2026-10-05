@@ -81,6 +81,24 @@ def merge_meshes(*meshes: Mesh) -> Mesh:
     )
 
 
+def merge_building_meshes(*meshes: BuildingMesh) -> BuildingMesh:
+    """Concatenate building meshes into one vertex array, solids kept apart."""
+    meshes = tuple(m for m in meshes if m.count)
+    if not meshes:
+        return BuildingMesh.empty()
+    offsets = np.cumsum([0] + [m.vertices.shape[0] for m in meshes[:-1]])
+    return BuildingMesh(
+        vertices=np.vstack([m.vertices for m in meshes]),
+        roof_faces=np.vstack(
+            [m.roof_faces + o for m, o in zip(meshes, offsets, strict=True)]
+        ),
+        wall_faces=np.vstack(
+            [m.wall_faces + o for m, o in zip(meshes, offsets, strict=True)]
+        ),
+        count=sum(m.count for m in meshes),
+    )
+
+
 def _perimeter_indices(rows: int, cols: int) -> np.ndarray:
     """Grid-node indices around the boundary, counter-clockwise seen from above.
 

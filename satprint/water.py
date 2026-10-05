@@ -8,17 +8,23 @@ colors when the tiles are unavailable.
 
 from __future__ import annotations
 
+from dataclasses import replace
+
 import numpy as np
 import shapely
 from shapely import Polygon
+from shapely.ops import unary_union
 
-from .buildings import model_projection, vector_tile_features
+from .buildings import _polygons, model_projection, vector_tile_features
 from .mesh import BuildingMesh, Mesh, heightmap_split_solids
-from .terrain import BBox, _tile_count
+from .terrain import BBox, Heightmap, _tile_count
 
 # OpenMapTiles water classes worth coloring; swimming pools (often on
 # roofs) are left out.
 WATER_CLASSES = {"ocean", "sea", "lake", "river", "pond", "reservoir", "basin", "dock"}
+# Water that lies flat. A river runs downhill, so it is left as the data has it.
+STILL_WATER = {"ocean", "sea", "lake", "reservoir", "pond", "basin"}
+SHORE_PX = (1.0, 3.0)  # the shore sampled between these distances from the water
 MAX_WATER_TILES = 16  # water zoom drops until the area fits in this many tiles
 # Display colors for the 3MF parts; the slicer picks the filaments.
 PART_COLORS = {
@@ -47,6 +53,62 @@ def water_from_vector_tiles(tiles: list[tuple[int, int, int, bytes]]) -> list[Po
         for poly, props in vector_tile_features(tiles, "water")
         if props.get("class", "lake") in WATER_CLASSES
     ]
+
+
+def level_water(hm: Heightmap, tiles: list[tuple[int, int, int, bytes]]) -> Heightmap:
+    """``hm`` with each lake, pond, reservoir and sea surface flattened to its shore.
+
+    Elevation data over water is unreliable: radar returns and void filling
+    leave noise, and a lake in a steep valley can read tens of meters above
+    its shore, which prints as a raised plateau. Each water body is set to
+    the 10th percentile of the ground along its shore, the lower shore, and
+    only ever lowered, so a body the data already shows flat is unchanged.
+
+    :param hm: a heightmap with a bounding box.
+    :param tiles: vector tiles covering it, as :meth:`VectorTileClient.tiles` returns.
+    :return: a new heightmap, or ``hm`` itself when there is no still water.
+    """
+    if hm.bbox is None:
+        return hm
+    rows, cols = hm.data.shape
+    shapes = [
+        poly
+        for poly, props in vector_tile_features(tiles, "water")
+        if props.get("class", "lake") in STILL_WATER
+    ]
+    if not shapes:
+        return hm
+    # one pixel per unit, x east and y north, so a node (r, c) is at (c, rows-1-r);
+    # pieces cut at a tile edge are joined first so each body has one shore
+    to_px = model_projection(hm.bbox, cols - 1, rows - 1)
+    bodies = _polygons(unary_union([shapely.transform(p, to_px) for p in shapes]))
+    # The tiles outline a coast far finer than the grid; buffering that is
+    # slow and uses gigabytes, so keep the detail to a fraction of a node.
+    bodies = [b for body in bodies for b in _polygons(body.simplify(0.25))]
+    data = hm.data.copy()
+    changed = False
+    for body in bodies:
+        x0, y0, x1, y1 = body.buffer(SHORE_PX[1], quad_segs=2).bounds
+        c0, c1 = max(int(np.floor(x0)), 0), min(int(np.ceil(x1)), cols - 1)
+        r0, r1 = (
+            max(int(np.floor(rows - 1 - y1)), 0),
+            min(int(np.ceil(rows - 1 - y0)), rows - 1),
+        )
+        if c1 < c0 or r1 < r0:
+            continue
+        gx, gy = np.meshgrid(np.arange(c0, c1 + 1), rows - 1 - np.arange(r0, r1 + 1))
+        inside = shapely.contains_xy(body, gx, gy)
+        shore = shapely.contains_xy(
+            body.buffer(SHORE_PX[1], quad_segs=2), gx, gy
+        ) & ~shapely.contains_xy(body.buffer(SHORE_PX[0], quad_segs=2), gx, gy)
+        if inside.sum() < 4 or not shore.any():
+            continue
+        window = data[r0 : r1 + 1, c0 : c1 + 1]
+        level = np.percentile(window[shore], 10)
+        lowered = inside & (window > level)
+        window[lowered] = level
+        changed |= bool(lowered.any())
+    return replace(hm, data=data) if changed else hm
 
 
 def _fix_diagonals(mask: np.ndarray, max_rounds: int = 50) -> np.ndarray:

@@ -12,7 +12,9 @@ After you change the code, restart `satprint serve` to pick up the change.
 ## Build a model
 
 1. **Choose an area.** Search for a place, pick a preset, click **Draw
-   rectangle** and drag on the map, or type the bounds. The hint line shows the
+   rectangle** and drag on the map, or type the bounds. Dragging the map
+   afterwards slides it under the rectangle, so you can move the area without
+   redrawing it. The hint line shows the
    real size of the area and the model it makes.
 2. **Set the print.** Model width, base thickness, vertical exaggeration (1.5x
    to 3x reads well for most landscapes; 1x is true scale) or a fixed relief
@@ -20,6 +22,8 @@ After you change the code, restart `satprint serve` to pick up the change.
    for resin. Smoothing hides sensor noise on flat areas.
 3. **Add the extras you want.**
     - **Add buildings** for a city. City presets turn it on.
+    - **Add bridges over water** for a bay or a river. They are limited to
+      areas up to 40 km², like buildings, and work with or without them.
     - **Multi-color 3MF** for a multi-material printer, and a **Border frame**
       width for a rim around the model.
     - **Drape satellite imagery** for the textured GLB. It is on by default.

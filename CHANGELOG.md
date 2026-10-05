@@ -6,8 +6,57 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **3D preview zoom.** Scroll and pinch zoom in proportion to the gesture. The
+  controls library's own wheel zoom is divided by the device pixel ratio, and
+  Safari reports a trackpad pinch as gesture events it ignored.
+- **Presets set the Bridges checkbox** along with the buildings one, so a
+  mountain preset no longer carries over an area too large for bridges.
+- **Lakes printed as raised plateaus.** Elevation data over water is noisy, and
+  a lake in a steep valley, such as the Lagoa in Rio, can read tens of meters
+  above its shore. Each lake, pond, reservoir and sea surface is now set to the
+  lower shore of its own outline (the 10th percentile of the ground around it),
+  using the water layer of the vector tiles. It only ever lowers the data, so a
+  lake the data shows flat is unchanged, and rivers are left alone. If the
+  tiles are unavailable the data is used as it is.
+
 ### Added
 
+- **Version and docs link.** The header shows the running version, linked to its
+  release, and a Docs link to the documentation site.
+- **Light and dark theme.** A button in the header switches the page, including
+  the 3D preview, between them. The first visit follows the system setting,
+  and the choice is remembered in the browser.
+- **Mesh landmarks**: the Gateway Arch in St. Louis, the Eiffel Tower in Paris
+  and the Space Needle in Seattle, which printed as solid blobs because their
+  `building:part` stacks are extruded from the ground. Each is a closed
+  triangle mesh built from published dimensions, placed at a fixed position in
+  place of the buildings OSM maps under it, and only when the whole landmark
+  lies inside the area. The Arch is open underneath and the Eiffel Tower has
+  four legs with archways; both, and the Needle's saucer, are overhangs that
+  may want slicer supports. `building_mesh` takes `min_feature_mm` (default
+  0.6) so thin parts stay printable.
+- **Bridges over water** (`bridges: true`, `bridge_piers_mm`, `--bridges`,
+  `--bridge-piers MM`, and a Bridges checkbox in the web app), from the same
+  OpenFreeMap tiles as the buildings. OSM bridge outlines and bridge-tagged
+  road, rail and path lines that cross water become a raised deck, cut to the
+  water plus a landing of about 30 m on each bank. OSM has no deck heights, so
+  they are estimated from the banks: a landing is flat at the highest ground
+  under it, and the deck blends the landings' heights over the water, at least
+  1 mm above it. The span is a thin slab, open underneath, on piers at even
+  spacing, up to 20 mm apart by default. The piers are not the real ones, and
+  there are no towers or cables. Bridges join the buildings solids, so they
+  are in the STL, the GLB and the 3MF's `buildings` part, and the build
+  reports `bridges`. They share the 40 km2 limit with buildings. A failed
+  bridge download reports `bridge_error` and keeps the STL.
+- **Christ the Redeemer** in Rio de Janeiro as a mesh landmark: a 38 m figure
+  with its pedestal and outstretched arms, placed from its OSM node, which has
+  no outline. At city scale its arms would print thinner than the minimum
+  feature size, so the whole statue is enlarged in proportion until they do,
+  as a symbol on a map is.
+- **Presets** for the Gateway Arch, the Space Needle and Christ the Redeemer,
+  2 km each.
 - **On PyPI**: `pip install satprint`, first uploaded at 0.2.1. Tag pushes
   now publish to PyPI through trusted publishing, after the GitHub Release.
 

@@ -6,6 +6,34 @@ const $ = (id) => document.getElementById(id);
 const fmt = (v, d = 1) => Number(v).toLocaleString(undefined, { maximumFractionDigits: d });
 const status = (msg, cls = "") => { const el = $("status"); el.textContent = msg; el.className = "hint " + cls; };
 
+// ───────────────────────── version ─────────────────────────
+fetch("/api/health").then((r) => r.json()).then((h) => {
+  if (!h.version) return;
+  $("version").textContent = "v" + h.version;
+  $("version").href = "https://github.com/suchanek/satprint/releases/tag/v" + h.version;
+  $("version").hidden = false;
+}).catch(() => {});
+
+// ───────────────────────── theme ─────────────────────────
+// The page sets data-theme before first paint (see index.html); this flips it.
+const isLight = () => document.documentElement.dataset.theme === "light";
+// The icon shows what a click switches to: a sun in the dark theme, a moon in the light one.
+const ICON_SUN = '<svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>';
+const ICON_MOON = '<svg viewBox="0 0 24 24" width="18" height="18" fill="currentColor" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8z"/></svg>';
+function paintThemeButton() {
+  const b = $("theme-toggle");
+  b.innerHTML = isLight() ? ICON_MOON : ICON_SUN;
+  b.title = isLight() ? "Switch to dark theme" : "Switch to light theme";
+}
+paintThemeButton();
+$("theme-toggle").addEventListener("click", () => {
+  const next = isLight() ? "dark" : "light";
+  document.documentElement.dataset.theme = next;
+  try { localStorage.setItem("satprint-theme", next); } catch (e) {}
+  paintThemeButton();
+  if (typeof viewer !== "undefined" && viewer && viewer.grid) addGrid(viewer);
+});
+
 // ───────────────────────── map ─────────────────────────
 const hasLeaflet = typeof L !== "undefined";
 const map = hasLeaflet ? L.map("map", { worldCopyJump: true }).setView([45.975, 7.65], 11) : null;
@@ -57,10 +85,10 @@ function updateAreaHint() {
   const km = (m) => (m / 1000).toFixed(1);
   const width = +$("width_mm").value || 100;
   const km2 = w * h / 1e6;
-  const tooBig = $("buildings").checked && km2 > MAX_BUILDING_KM2;
+  const tooBig = ($("buildings").checked || $("bridges").checked) && km2 > MAX_BUILDING_KM2;
   $("area-hint").textContent =
     `Area ≈ ${km(w)} × ${km(h)} km  →  model ${fmt(width, 0)} × ${fmt(width * h / w, 0)} mm  (plan scale 1:${fmt(w / width * 1000, 0)})` +
-    (tooBig ? `  ·  too large for buildings (${fmt(km2, 0)} km², limit ${MAX_BUILDING_KM2})` : "");
+    (tooBig ? `  ·  too large for buildings and bridges (${fmt(km2, 0)} km², limit ${MAX_BUILDING_KM2})` : "");
   $("area-hint").className = "hint" + (tooBig ? " error" : "");
 }
 ["south", "west", "north", "east"].forEach((id) => $(id).addEventListener("change", () => setBBox(bboxFromInputs(), { fit: true })));
@@ -89,6 +117,24 @@ if (map) map.on("mouseup", (e) => {
   document.querySelector('input[name=source][value=terrarium]').checked = true;
 });
 
+// Dragging the map slides it under the rectangle, which keeps its place on
+// screen, so an area is chosen by panning. Zooming leaves the area alone.
+let held = null;
+if (map) map.on("dragstart", () => {
+  if (!rect) return;
+  const b = rect.getBounds();
+  held = [map.latLngToContainerPoint(b.getSouthWest()), map.latLngToContainerPoint(b.getNorthEast())];
+});
+if (map) map.on("move", () => {
+  if (!held) return;
+  const sw = map.containerPointToLatLng(held[0]), ne = map.containerPointToLatLng(held[1]);
+  setBBox({ south: sw.lat, west: sw.lng, north: ne.lat, east: ne.lng });
+});
+if (map) map.on("moveend", () => {
+  if (held) document.querySelector('input[name=source][value=terrarium]').checked = true;
+  held = null;
+});
+
 // presets, grouped; each suggests whether to add buildings
 const slug = (s) => s.split(",")[0].toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "terrain";
 fetch("/api/presets").then((r) => r.json()).then((presets) => {
@@ -102,17 +148,26 @@ fetch("/api/presets").then((r) => r.json()).then((presets) => {
     o.value = JSON.stringify(p); o.textContent = p.name;
     groups.get(p.group).appendChild(o);
   }
+  // open on a city that shows buildings, a landmark and bridges
+  const start = [...$("presets").options].find((o) => o.textContent === "Gateway Arch, St. Louis");
+  if (start) {
+    $("presets").value = start.value;
+    $("presets").dispatchEvent(new Event("change"));
+    $("bridges").checked = true;
+  }
 });
 $("presets").addEventListener("change", (e) => {
   if (!e.target.value) return;
   const p = JSON.parse(e.target.value);
   const [south, west, north, east] = p.bbox;
   $("buildings").checked = p.buildings;
+  $("bridges").checked = p.buildings;
   setBBox({ south, west, north, east }, { fit: true });
   $("name").value = slug(p.name);
   document.querySelector('input[name=source][value=terrarium]').checked = true;
 });
 $("buildings").addEventListener("change", updateAreaHint);
+$("bridges").addEventListener("change", updateAreaHint);
 
 // place search (Nominatim, through the server)
 function squareAround(lat, lon, km) {
@@ -220,6 +275,24 @@ function initViewer() {
     const camera = new THREE.PerspectiveCamera(40, 1, 0.1, 5000);
     const controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
+    // OrbitControls' wheel zoom is divided by the device pixel ratio and a
+    // trackpad pinch sends tiny steps, so zooming takes many pinches, and
+    // Safari reports a pinch as gesture events it ignores. Zoom here instead,
+    // in proportion to the gesture; touch screens keep OrbitControls' own.
+    const dolly = (factor) => {
+      const offset = camera.position.clone().sub(controls.target);
+      const dist = Math.min(Math.max(offset.length() * factor, 2), 4500);   // inside the clip planes
+      camera.position.copy(controls.target).add(offset.setLength(dist));
+    };
+    viewerEl.addEventListener("wheel", (e) => {
+      e.preventDefault(); e.stopPropagation();
+      const dy = e.deltaY * (e.deltaMode === 1 ? 16 : 1);   // lines -> pixels
+      dolly(Math.exp(dy * (e.ctrlKey ? 0.01 : 0.004)));      // ctrl: a pinch
+    }, { passive: false, capture: true });
+    let pinch = 1;
+    viewerEl.addEventListener("gesturestart", (e) => { e.preventDefault(); pinch = 1; });
+    viewerEl.addEventListener("gesturechange", (e) => { e.preventDefault(); dolly(pinch / e.scale); pinch = e.scale; });
+    viewerEl.addEventListener("gestureend", (e) => e.preventDefault());
     scene.add(new THREE.HemisphereLight(0xffffff, 0x334455, 1.1));
     const sun = new THREE.DirectionalLight(0xffffff, 1.6); sun.position.set(-1, 1.5, 1); scene.add(sun);
     const material = new THREE.MeshStandardMaterial({ color: 0xd9c9a8, metalness: 0.05, roughness: 0.85 });
@@ -252,6 +325,14 @@ function disposeModel(v) {
 }
 
 // Show the textured GLB when there is one, otherwise the STL.
+// The floor grid, in colors that suit the theme; replaces any earlier one.
+function addGrid(v) {
+  if (v.grid) v.scene.remove(v.grid);
+  const [center, lines] = isLight() ? [0x8a96a6, 0xb4bdc9] : [0x3a4656, 0x263040];
+  v.grid = new v.THREE.GridHelper(v.gridSize, 16, center, lines);
+  v.grid.position.y = v.gridY;
+  v.scene.add(v.grid);
+}
 // GLB is in meters, Y up; STL is in mm, Z up. Both end up in mm, Y up, centered.
 async function showModel(buffer, info, isGLB) {
   let v;
@@ -263,7 +344,6 @@ async function showModel(buffer, info, isGLB) {
   }
   const { THREE, STLLoader, GLTFLoader, scene, camera, controls, material } = v;
   disposeModel(v);
-  if (v.grid) scene.remove(v.grid);
   if (isGLB) {
     const gltf = await new GLTFLoader().parseAsync(buffer, "");
     const model = gltf.scene;
@@ -281,9 +361,8 @@ async function showModel(buffer, info, isGLB) {
   }
   scene.add(v.mesh);
   const size = Math.max(info.width_mm, info.depth_mm);
-  v.grid = new THREE.GridHelper(size * 1.6, 16, 0x3a4656, 0x263040);
-  v.grid.position.y = -info.height_mm / 2;
-  scene.add(v.grid);
+  v.gridSize = size * 1.6; v.gridY = -info.height_mm / 2;
+  addGrid(v);
   camera.position.set(size * 0.9, size * 0.75, size * 1.1);
   controls.target.set(0, 0, 0); controls.update();
   viewerEl.querySelector(".placeholder")?.remove();
@@ -296,6 +375,8 @@ const STAGE_LABELS = {
   elevation: "Elevation tiles",
   buildings: "Building data tiles",
   "building mesh": "Building solids",
+  bridges: "Bridge data tiles",
+  "bridge mesh": "Bridge solids",
   "terrain mesh": "Terrain mesh",
   imagery: "Imagery tiles",
   water: "Water data tiles",
@@ -337,7 +418,7 @@ $("btn-generate").addEventListener("click", async () => {
     exaggeration: +$("exaggeration").value, relief_mm: relief ? +relief : null,
     smoothing: +$("smoothing").value, clamp_sea_level: $("clamp").checked, texture: $("texture").checked,
     buildings: $("buildings").checked, building_scale: +$("building_scale").value || 1,
-    building_source: $("building_source").value, multicolor: $("multicolor").checked,
+    bridges: $("bridges").checked, building_source: $("building_source").value, multicolor: $("multicolor").checked,
     frame_mm: +$("frame_mm").value || 0,
     frame_height_mm: $("frame_height_mm").value ? +$("frame_height_mm").value : null,
     name: $("name").value || "terrain",
@@ -361,6 +442,7 @@ $("btn-generate").addEventListener("click", async () => {
       ["Est. PLA", `${fmt(i.est_weight_g_pla_20pct, 0)} g @ 20 % infill · ${fmt(i.est_weight_g_pla_solid, 0)} g solid`],
       ["Source", i.source + (i.source_meta?.zoom != null ? ` (zoom ${i.source_meta.zoom}, ${i.source_meta.tiles} tiles)` : "")],
       ...(i.buildings != null ? [["Buildings", `${fmt(i.buildings, 0)} (${{ openfreemap: "OpenStreetMap via OpenFreeMap", overpass: "OpenStreetMap via Overpass", overture: "Overture Maps" }[i.building_source] || i.building_source})`]] : []),
+      ...(i.bridges != null ? [["Bridges", fmt(i.bridges, 0)]] : []),
       ...(i.multicolor_parts ? [["Multi-color", `${i.multicolor_parts.join(", ")} (${fmt(i.water_fraction * 100, 0)} % water)`]] : []),
       ...(i.textured ? [["Texture", `${i.texture_meta.px[1]} × ${i.texture_meta.px[0]} px (zoom ${i.texture_meta.zoom}, ${i.texture_meta.tiles} tiles)`]] : []),
     ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
@@ -387,6 +469,7 @@ $("btn-generate").addEventListener("click", async () => {
       i.texture_error && `No texture: ${i.texture_error}`,
       i.building_error && `No buildings: ${i.building_error}`,
       i.building_warning && `Buildings: ${i.building_warning}`,
+      i.bridge_error && `No bridges: ${i.bridge_error}`,
     ].filter(Boolean);
     status(`Done in ${i.generate_seconds}s.` + (problems.length ? " " + problems.join(" ") : ""), problems.length ? "error" : "ok");
   } catch (err) {

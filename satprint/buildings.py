@@ -22,7 +22,9 @@ Roofs tagged ``roof:shape`` dome, onion, cone or pyramidal get that shape
 (:data:`ROOF_PROFILES`); every other roof is flat. The vector tiles carry no
 roof tags, so :func:`apply_shapes` merges in the shaped buildings from a small
 Overpass query. A few landmarks are replaced by exact shapes from
-:mod:`satprint.landmarks`.
+:mod:`satprint.landmarks`. Those a prism cannot express, such as an arch or
+separate legs, carry a closed triangle mesh in :attr:`Building.solid`, which
+:func:`building_mesh` places on the terrain as it is.
 """
 
 from __future__ import annotations
@@ -30,7 +32,9 @@ from __future__ import annotations
 import gzip
 import math
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any, Literal, overload
 
 import mapbox_vector_tile
 import numpy as np
@@ -89,6 +93,10 @@ class Building:
     roof_height_m: float = 0.0  # included in height_m
     osm_id: str = ""  # "way/123", where the source says
     wikidata: str = ""
+    # Called with the minimum feature size in meters; returns (vertices, faces):
+    # lon, lat and meters above the ground, and a closed, outward-wound mesh.
+    # ``footprint`` is then its plan outline and ``height_m`` its height.
+    solid: Callable[[float], tuple[np.ndarray, np.ndarray]] | None = None
 
 
 def _parse_length(raw: str) -> float | None:
@@ -185,6 +193,16 @@ def _polygons(geom) -> list[Polygon]:
     return []
 
 
+def _lines(geom) -> list[LineString]:
+    if geom is None or geom.is_empty:
+        return []
+    if isinstance(geom, LineString):
+        return [geom]
+    if hasattr(geom, "geoms"):
+        return [p for g in geom.geoms for p in _lines(g)]
+    return []
+
+
 def buildings_from_osm(data: dict) -> list[Building]:
     """Parse an Overpass ``out body geom`` response into buildings."""
     outlines: list[Building] = []
@@ -236,16 +254,30 @@ def buildings_from_osm(data: dict) -> list[Building]:
     return outlines + parts
 
 
+@overload
 def vector_tile_features(
-    tiles: list[tuple[int, int, int, bytes]], layer: str
-) -> list[tuple[Polygon, dict]]:
-    """Polygons of one layer of OpenMapTiles vector tiles, in lon/lat.
+    tiles: list[tuple[int, int, int, bytes]], layer: str, lines: Literal[False] = ...
+) -> list[tuple[Polygon, dict]]: ...
+
+
+@overload
+def vector_tile_features(
+    tiles: list[tuple[int, int, int, bytes]], layer: str, lines: Literal[True]
+) -> list[tuple[LineString, dict]]: ...
+
+
+def vector_tile_features(
+    tiles: list[tuple[int, int, int, bytes]], layer: str, lines: bool = False
+) -> list[tuple[Any, dict]]:
+    """Polygons of one layer of OpenMapTiles vector tiles, in lon/lat, or
+    its lines with ``lines=True``.
 
     Each feature is clipped to its own tile, without the tile buffer, so a
     shape crossing a tile edge comes back as two pieces that meet at the
     edge instead of two overlapping copies.
     """
-    out: list[tuple[Polygon, dict]] = []
+    kinds = ("LineString", "MultiLineString") if lines else ("Polygon", "MultiPolygon")
+    out: list[tuple[Any, dict]] = []
     for z, x, y, data in tiles:
         if data[:2] == b"\x1f\x8b":
             data = gzip.decompress(data)
@@ -265,12 +297,19 @@ def vector_tile_features(
             return np.column_stack([gx * 360.0 - 180.0, lat])
 
         for f in found["features"]:
-            if f["geometry"]["type"] not in ("Polygon", "MultiPolygon"):
+            if f["geometry"]["type"] not in kinds:
                 continue
-            geom = shapely.make_valid(shape(f["geometry"])).intersection(frame)
-            for poly in _polygons(geom):
-                if poly.area > 0:
-                    out.append((shapely.transform(poly, to_lonlat), f["properties"]))
+            geom = shape(f["geometry"])
+            if lines:
+                parts = _lines(geom.intersection(frame))
+            else:
+                parts = [
+                    p
+                    for p in _polygons(shapely.make_valid(geom).intersection(frame))
+                    if p.area > 0
+                ]
+            for part in parts:
+                out.append((shapely.transform(part, to_lonlat), f["properties"]))
     return out
 
 
@@ -492,6 +531,7 @@ def building_mesh(
     min_area_mm2: float = 0.05,
     simplify_mm: float = 0.05,
     min_roof_mm: float = 0.3,
+    min_feature_mm: float = 0.6,
     progress: Progress | None = None,
 ) -> BuildingMesh:
     """Place ``buildings`` on the terrain block built from ``relief_mm``.
@@ -511,6 +551,8 @@ def building_mesh(
     :param simplify_mm: footprint simplification tolerance.
     :param min_roof_mm: shaped roofs lower than this are printed flat, at the
         building's full height.
+    :param min_feature_mm: thinnest part of a building that carries a
+        :attr:`Building.solid` mesh, which is asked to honor it.
     :param progress: called as ``progress("building mesh", done, total)``.
     :return: all buildings as one :class:`BuildingMesh`.
     """
@@ -525,9 +567,12 @@ def building_mesh(
     count = 0
     footprints: list[tuple[Polygon, float]] = []
     shaped: list[tuple[Polygon, float, Profile, float]] = []
+    meshes = [b.solid for b in buildings if b.solid is not None]
     for n_done, b in enumerate(buildings):
         if progress and n_done % 500 == 0:
             progress("building mesh", n_done, len(buildings))
+        if b.solid is not None:
+            continue  # placed below, outside the footprint pipeline
         model = shapely.transform(b.footprint, to_model)
         clipped = shapely.make_valid(model.intersection(frame))
         h_mm = max(b.height_m * mm_per_m * scale, min_height_mm)
@@ -639,6 +684,21 @@ def building_mesh(
         verts.append(v)
         roofs.append(r + offset)
         walls.append(w + offset)
+        offset += v.shape[0]
+        count += 1
+
+    for solid in meshes:
+        v, f = solid(min_feature_mm / mm_per_m)
+        xy = to_model(v[:, :2])
+        on_ground = v[:, 2] <= 1e-9
+        z0 = float(_sample(relief, width_mm, depth_mm, xy[on_ground]).min())
+        z = z0 + base_mm - sink_mm + v[:, 2] * mm_per_m * scale
+        v = np.column_stack([xy, z])
+        p0, p1, p2 = v[f[:, 0]], v[f[:, 1]], v[f[:, 2]]
+        up = np.cross(p1 - p0, p2 - p0)[:, 2] > 0
+        verts.append(v)
+        roofs.append(f[up] + offset)
+        walls.append(f[~up] + offset)
         offset += v.shape[0]
         count += 1
     if not verts:

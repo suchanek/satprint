@@ -46,14 +46,17 @@ The request body takes the same settings as the web app:
 | `buildings` | `false` | Add OpenStreetMap buildings |
 | `building_scale` | 1 | Building height multiplier |
 | `building_source` | `auto` | `auto`, `openfreemap`, `overpass` or `overture` |
+| `bridges` | `false` | Add OpenStreetMap bridges over water |
+| `bridge_piers_mm` | 20 | Longest distance between bridge piers; 0 for none |
 | `multicolor` | `false` | Also write the multi-color 3MF |
 | `frame_mm` | 0 | Border frame width; 0 for none |
 | `frame_height_mm` | base + 1 | Frame height |
 | `name` | `terrain` | Model name, used in the file names |
 
-Buildings, the texture and the multi-color 3MF need a `terrarium` source. When
-one of their downloads fails, you still get the STL, and `info` says why in
-`building_error`, `texture_error` or `water_error`. When the roof shapes could
+Buildings, bridges, the texture and the multi-color 3MF need a `terrarium`
+source. When one of their downloads fails, you still get the STL, and `info`
+says why in `building_error`, `bridge_error`, `texture_error` or
+`water_error`. With bridges on, `info.bridges` is the number of bridges built. When the roof shapes could
 not be fetched, the buildings are flat-roofed and `building_warning` says so.
 
 ## Build in the background

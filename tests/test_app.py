@@ -5,11 +5,12 @@ import numpy as np
 import pytest
 from fastapi.testclient import TestClient
 from PIL import Image
-from shapely import box
+from shapely import LineString, box
 
 from satprint.app import create_app
 from satprint.mesh import read_binary_stl, read_glb
 from satprint.osm import Geocoder, OverpassClient, VectorTileClient
+from tests.test_bridges import encode
 from tests.test_buildings import encode_tile
 from tests.test_terrain import FakeFetcher, FakeImageryFetcher
 
@@ -59,7 +60,8 @@ class FakeOverpass(OverpassClient):
 
 
 class FakeVectorTiles(VectorTileClient):
-    """One vector tile with one building at its center, or a failure."""
+    """One vector tile with one building at its center, or a failure; for
+    bridges, a river with a road across it."""
 
     def __init__(self, fail=False):
         super().__init__(cache_dir="/nonexistent")
@@ -85,6 +87,18 @@ class FakeVectorTiles(VectorTileClient):
                         }
                     ]
                     out.append((zoom, tx, ty, encode_tile(feats, layer="water")))
+                    continue
+                if stage == "bridges":
+                    # a river across every tile and a road over it
+                    out.append(
+                        encode(
+                            water=[box(1500, 0, 2600, 4096)],
+                            lines=[(LineString([(0, 2048), (4096, 2048)]), "primary")],
+                            z=zoom,
+                            x=tx,
+                            y=ty,
+                        )
+                    )
                     continue
                 # one block over the whole tile, so any area gets a building
                 feats = [
@@ -338,6 +352,79 @@ def test_building_problems_do_not_fail_the_model():
     assert r.status_code == 200
     assert "limited to 40 km2" in r.json()["info"]["building_error"]
     assert overpass.calls == 0
+
+
+# own areas: the app caches by area, across tests
+BRIDGE_AREA = {"south": 40.85, "west": -73.99, "north": 40.868, "east": -73.968}
+BRIDGE_ERROR_AREA = {"south": 40.90, "west": -73.99, "north": 40.91, "east": -73.98}
+
+
+def test_bridges_are_added_to_the_stl():
+    vt = FakeVectorTiles()
+    client = make_client(vector_tiles=vt)
+    base = {
+        "source": "terrarium",
+        "resolution": 64,
+        "bbox": BRIDGE_AREA,
+        "texture": False,
+    }
+    plain = client.post("/api/model", json=base).json()["info"]
+    assert "bridges" not in plain
+    r = client.post("/api/model", json={**base, "bridges": True})
+    assert r.status_code == 200, r.text
+    info = r.json()["info"]
+    assert info["bridges"] >= 1 and "buildings" not in info
+    assert info["triangles"] > plain["triangles"]
+    assert info["height_mm"] > plain["height_mm"]
+    tri = read_binary_stl(client.get(r.json()["stl_url"]).content)
+    assert tri.shape[0] == info["triangles"]
+    # features are cached: the same area again does not fetch tiles again
+    calls = vt.calls
+    again = client.post(
+        "/api/model", json={**base, "bridges": True, "bridge_piers_mm": 0}
+    )
+    assert vt.calls == calls
+    assert again.json()["info"]["triangles"] < info["triangles"]  # no piers
+    assert again.json()["info"]["bridges"] == info["bridges"]
+
+
+def test_bridges_work_with_buildings_in_the_glb_and_3mf():
+    import zipfile
+
+    client = make_client(vector_tiles=FakeVectorTiles())
+    body = {
+        "source": "terrarium",
+        "resolution": 64,
+        "bbox": BRIDGE_AREA,
+        "bridges": True,
+        "multicolor": True,
+    }
+    j = client.post("/api/model", json=body).json()
+    info = j["info"]
+    # bridges share the buildings part, and OSM is credited without buildings
+    assert info["bridges"] >= 1 and info["multicolor_parts"] == [
+        "land",
+        "water",
+        "buildings",
+    ]
+    doc, _ = read_glb(client.get(j["glb_url"]).content)
+    assert "OpenStreetMap" in doc["asset"]["copyright"]
+    with zipfile.ZipFile(io.BytesIO(client.get(j["threemf_url"]).content)) as z:
+        assert "OpenStreetMap" in z.read("3D/3dmodel.model").decode()
+    both = client.post("/api/model", json={**body, "buildings": True}).json()["info"]
+    assert both["bridges"] == info["bridges"] and both["buildings"] >= 1
+
+
+def test_bridge_problems_do_not_fail_the_model(client):
+    base = {"source": "terrarium", "resolution": 64, "bbox": BRIDGE_ERROR_AREA}
+    r = client.post("/api/model", json={**base, "bridges": True})  # tiles fail
+    assert r.status_code == 200, r.text
+    info = r.json()["info"]
+    assert "unreachable" in info["bridge_error"] and "bridges" not in info
+    big = {"south": 45.0, "west": 7.0, "north": 45.2, "east": 7.3}  # ~500 km2
+    r = client.post("/api/model", json={**base, "bbox": big, "bridges": True})
+    assert r.status_code == 200
+    assert "limited to 40 km2" in r.json()["info"]["bridge_error"]
 
 
 def test_search(client):

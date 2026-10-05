@@ -16,9 +16,25 @@ base. You get three files from the same model:
 
 ![The satprint web app](screenshot.png)
 
-Mount Fuji from real elevation tiles, 120 mm wide, 1.2x exaggeration:
+The page follows your system's light or dark setting, and the button in the
+header switches it:
+
+![The satprint web app, light theme](screenshot-light.png)
+
+Mount Fuji from real elevation tiles, 120 mm wide with a 5 mm frame, 1.5x
+exaggeration:
 
 ![Mount Fuji preview](fuji-preview.png)
+
+Landmarks that building outlines cannot describe are built as meshes: the
+Gateway Arch, the Eiffel Tower, the Space Needle and Christ the Redeemer.
+
+![Landmarks as meshes](landmarks.png)
+
+Bridges over water get a deck on piers, here the Brooklyn and Manhattan bridges
+and the Golden Gate Bridge:
+
+![Bridges over water](bridges.png)
 
 ## What it does
 

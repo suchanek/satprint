@@ -82,10 +82,13 @@ def level_water(hm: Heightmap, tiles: list[tuple[int, int, int, bytes]]) -> Heig
     # pieces cut at a tile edge are joined first so each body has one shore
     to_px = model_projection(hm.bbox, cols - 1, rows - 1)
     bodies = _polygons(unary_union([shapely.transform(p, to_px) for p in shapes]))
+    # The tiles outline a coast far finer than the grid; buffering that is
+    # slow and uses gigabytes, so keep the detail to a fraction of a node.
+    bodies = [b for body in bodies for b in _polygons(body.simplify(0.25))]
     data = hm.data.copy()
     changed = False
     for body in bodies:
-        x0, y0, x1, y1 = body.buffer(SHORE_PX[1]).bounds
+        x0, y0, x1, y1 = body.buffer(SHORE_PX[1], quad_segs=2).bounds
         c0, c1 = max(int(np.floor(x0)), 0), min(int(np.ceil(x1)), cols - 1)
         r0, r1 = (
             max(int(np.floor(rows - 1 - y1)), 0),
@@ -96,8 +99,8 @@ def level_water(hm: Heightmap, tiles: list[tuple[int, int, int, bytes]]) -> Heig
         gx, gy = np.meshgrid(np.arange(c0, c1 + 1), rows - 1 - np.arange(r0, r1 + 1))
         inside = shapely.contains_xy(body, gx, gy)
         shore = shapely.contains_xy(
-            body.buffer(SHORE_PX[1]), gx, gy
-        ) & ~shapely.contains_xy(body.buffer(SHORE_PX[0]), gx, gy)
+            body.buffer(SHORE_PX[1], quad_segs=2), gx, gy
+        ) & ~shapely.contains_xy(body.buffer(SHORE_PX[0], quad_segs=2), gx, gy)
         if inside.sum() < 4 or not shore.any():
             continue
         window = data[r0 : r1 + 1, c0 : c1 + 1]

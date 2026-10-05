@@ -8,6 +8,11 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Fixed
 
+- **3D preview zoom.** Scroll and pinch zoom in proportion to the gesture. The
+  controls library's own wheel zoom is divided by the device pixel ratio, and
+  Safari reports a trackpad pinch as gesture events it ignored.
+- **Presets set the Bridges checkbox** along with the buildings one, so a
+  mountain preset no longer carries over an area too large for bridges.
 - **Lakes printed as raised plateaus.** Elevation data over water is noisy, and
   a lake in a steep valley, such as the Lagoa in Rio, can read tens of meters
   above its shore. Each lake, pond, reservoir and sea surface is now set to the
@@ -18,6 +23,11 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Added
 
+- **Version and docs link.** The header shows the running version, linked to its
+  release, and a Docs link to the documentation site.
+- **Light and dark theme.** A button in the header switches the page, including
+  the 3D preview, between them. The first visit follows the system setting,
+  and the choice is remembered in the browser.
 - **Mesh landmarks**: the Gateway Arch in St. Louis, the Eiffel Tower in Paris
   and the Space Needle in Seattle, which printed as solid blobs because their
   `building:part` stacks are extruded from the ground. Each is a closed

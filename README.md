@@ -36,7 +36,8 @@ AWS Terrain Tiles        clamp sea, smooth,           terrain + walls + base
 
 ![satprint web UI](https://raw.githubusercontent.com/suchanek/satprint/v0.2.1/docs/screenshot.png)
 
-Mount Fuji from real elevation tiles, 120 mm wide, 1.2x exaggeration:
+Mount Fuji from real elevation tiles, 120 mm wide with a 5 mm frame, 1.5x
+exaggeration:
 
 ![Mount Fuji preview](https://raw.githubusercontent.com/suchanek/satprint/v0.2.1/docs/fuji-preview.png)
 

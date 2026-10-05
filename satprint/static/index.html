@@ -8,6 +8,16 @@
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
       integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="">
 <link rel="stylesheet" href="/static/style.css">
+<script>
+// Before first paint, so a light page does not flash dark: the saved choice,
+// else the system's.
+(function () {
+  var t = null;
+  try { t = localStorage.getItem("satprint-theme"); } catch (e) {}
+  if (t !== "light" && t !== "dark") t = matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+  document.documentElement.dataset.theme = t;
+})();
+</script>
 <script type="importmap">
 { "imports": {
     "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
@@ -20,11 +30,13 @@
   <div class="brand">
     <img class="logo" src="/static/satprint-mark.svg" alt="" width="44" height="41">
     <div>
-      <h1>satprint</h1>
+      <h1>satprint <a id="version" class="version" href="https://github.com/suchanek/satprint/releases" target="_blank" rel="noopener" title="Release notes" hidden></a></h1>
       <p>Pick a place on Earth. Get a 3D-printable terrain model.</p>
     </div>
   </div>
   <nav>
+    <button id="theme-toggle" type="button" aria-label="Switch between light and dark theme"></button>
+    <a href="https://suchanek.github.io/satprint/" target="_blank" rel="noopener">Docs</a>
     <a href="/docs" target="_blank" rel="noopener">API</a>
   </nav>
 </header>

@@ -206,3 +206,31 @@ def test_level_water_leaves_rivers_and_flat_lakes_alone():
         level_water(Heightmap(hm.data, 800.0, 800.0, "t"), _lake_tile("lake")).bbox
         is None
     )
+
+
+def test_level_water_handles_an_outline_finer_than_the_grid():
+    """A coast drawn in thousands of tiny steps, as the tiles have it, took
+    gigabytes to buffer before the outline was simplified."""
+    import time
+
+    from shapely import Polygon
+
+    rng = np.random.default_rng(0)
+    t = np.linspace(0, 2 * np.pi, 6000, endpoint=False)
+    r = 1000 + rng.integers(-4, 5, t.size)  # jagged at a fraction of a node
+    ring = Polygon(np.column_stack([2048 + r * np.cos(t), 2048 + r * np.sin(t)]))
+    tile = [
+        (
+            14,
+            4824,
+            6157,
+            encode_tile(
+                [{"geometry": ring, "properties": {"class": "lake"}}], layer="water"
+            ),
+        )
+    ]
+    hm = _lake_heightmap()
+    start = time.monotonic()
+    out = level_water(hm, tile)
+    assert time.monotonic() - start < 1
+    assert out.data[32, 32] == pytest.approx(40.0)  # the lake's middle

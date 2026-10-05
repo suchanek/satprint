@@ -430,4 +430,4 @@ def fetch_buildings(
             found = apply_shapes(found, buildings_from_osm(osm.shaped(bbox)))
         except Exception as exc:  # shapes refine the buildings; keep them flat
             warning = f"roof shapes unavailable, roofs are flat: {exc}"
-    return apply_landmarks(found), warning
+    return apply_landmarks(found, bbox), warning

@@ -34,10 +34,11 @@ Mount Fuji from real elevation tiles, 120 mm wide, 1.2x exaggeration:
 - **Buildings** from OpenStreetMap, as closed solids standing on the terrain.
   Towers keep their setbacks, and overlapping footprints are merged so no two
   solids pass through each other.
+- **Bridges** over water from OpenStreetMap, as a raised deck on piers.
 - **Four colors.** Land, water, buildings and a border frame are separate parts
   of one 3MF object, already on filaments 1 to 4 in Bambu Studio.
-- **Search and presets.** Search any place by name, or pick one of 67 presets:
-  37 cities and landmarks and 30 mountains and landscapes.
+- **Search and presets.** Search any place by name, or pick one of 70 presets:
+  40 cities and landmarks and 30 mountains and landscapes.
 
 ## Where to go next
 

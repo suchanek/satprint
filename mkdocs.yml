@@ -65,6 +65,7 @@ nav:
       - Terrain and elevation: api/terrain.md
       - Meshes and file writers: api/mesh.md
       - Buildings: api/buildings.md
+      - Bridges: api/bridges.md
       - Water and 3MF parts: api/water.md
       - Map services: api/osm.md
       - Presets: api/presets.md

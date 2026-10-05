@@ -437,7 +437,7 @@ def test_sphere_landmark_is_a_cut_sphere():
         **{"roof:shape": "dome"},
     )
     other = way(_square(40.002, -73.998), building="yes", height="20")
-    found = apply_landmarks(buildings_from_osm({"elements": [sphere_way, other]}))
+    found = apply_landmarks(buildings_from_osm({"elements": [sphere_way, other]}), BBOX)
     sphere = next(b for b in found if b.wikidata == "Q60749353")
     assert sphere.height_m == 112 and sphere.roof_height_m == 112
     # ground circle of a 78.5 m sphere whose center is 33.5 m up
@@ -460,10 +460,10 @@ def test_landmark_matches_by_osm_id():
     from satprint.landmarks import apply_landmarks
 
     b = Building(box(-115.163, 36.121, -115.161, 36.123), 100, osm_id="way/976405284")
-    (sphere,) = apply_landmarks([b])
+    (sphere,) = apply_landmarks([b], BBOX)
     assert sphere.profile and sphere.height_m == 112
     plain = Building(box(0, 0, 1, 1), 10, osm_id="way/1")
-    assert apply_landmarks([plain]) == [plain]
+    assert apply_landmarks([plain], BBOX) == [plain]
 
 
 def test_dome_in_a_taller_wing_is_not_a_pit():

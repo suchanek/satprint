@@ -10,8 +10,9 @@ order:
 | 3 | `buildings` | white |
 | 4 | `border` | dark gray |
 
-Parts without geometry are left out: there is no `buildings` part without
-buildings, and no `border` part without a frame.
+Bridges share the `buildings` part. Parts without geometry are left out:
+there is no `buildings` part without buildings or bridges, and no `border`
+part without a frame.
 
 ## Make one
 
@@ -54,6 +55,7 @@ filaments by hand.
   together. A river narrower than one grid cell does not show, so raise the
   resolution to keep it.
 - **Buildings** are the same solids as in the STL, sunk 0.3 mm into the
-  terrain. Slicers resolve that overlap.
+  terrain. Slicers resolve that overlap. Bridges are in this part too, so a
+  bridge prints in the buildings filament.
 - **Border** is a closed rectangular ring against the walls of the block, 1 mm
   above the base by default.

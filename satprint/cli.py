@@ -7,6 +7,7 @@ Usage:
     satprint build --bbox S W N E --glb model.glb -o model.stl
     satprint build --bbox S W N E --buildings [--building-scale 2] -o city.stl
     satprint build --bbox S W N E --buildings --frame 5 --3mf city.3mf -o city.stl
+    satprint build --bbox S W N E --bridges [--bridge-piers 20] -o bay.stl
     satprint build --synthetic -o demo.stl
     satprint build --file dem.tif --ground-width 15000 -o model.stl
 """
@@ -18,6 +19,7 @@ import io
 import json
 import sys
 
+from .bridges import bridge_mesh, bridges_from_vector_tiles
 from .buildings import (
     MAX_BUILDING_AREA_KM2,
     bbox_area_km2,
@@ -27,6 +29,7 @@ from .mesh import (
     check_watertight,
     frame_mesh,
     heightmap_to_mesh,
+    merge_building_meshes,
     merge_meshes,
     write_3mf,
     write_binary_stl,
@@ -50,7 +53,7 @@ from .terrain import (
     prepare_relief,
     synthetic_heightmap,
 )
-from .water import multicolor_parts, water_from_vector_tiles, water_zoom
+from .water import level_water, multicolor_parts, water_from_vector_tiles, water_zoom
 
 
 def _build(args) -> int:
@@ -67,15 +70,27 @@ def _build(args) -> int:
         bbox = BBox(*args.bbox)
         print(f"fetching elevation for {bbox} ...", file=sys.stderr)
         hm = fetch_terrarium(bbox, target_cols=args.resolution)
+        try:  # data over water is noisy; levelling refines it, so a failure keeps it
+            hm = level_water(hm, VectorTileClient().tiles(bbox, zoom=water_zoom(bbox)))
+        except Exception as exc:
+            print(f"warning: water not levelled: {exc}", file=sys.stderr)
     else:
         print("error: give --bbox, --file or --synthetic", file=sys.stderr)
         return 2
-    if (args.glb or args.buildings or args.threemf) and hm.bbox is None:
-        print("error: --glb, --buildings and --3mf need --bbox", file=sys.stderr)
-        return 2
-    if args.buildings and hm.bbox and bbox_area_km2(hm.bbox) > MAX_BUILDING_AREA_KM2:
+    if (args.glb or args.buildings or args.bridges or args.threemf) and hm.bbox is None:
         print(
-            f"error: --buildings is limited to {MAX_BUILDING_AREA_KM2:.0f} km2; "
+            "error: --glb, --buildings, --bridges and --3mf need --bbox",
+            file=sys.stderr,
+        )
+        return 2
+    if (
+        (args.buildings or args.bridges)
+        and hm.bbox
+        and bbox_area_km2(hm.bbox) > MAX_BUILDING_AREA_KM2
+    ):
+        print(
+            f"error: --buildings and --bridges are limited to "
+            f"{MAX_BUILDING_AREA_KM2:.0f} km2; "
             f"this area is {bbox_area_km2(hm.bbox):.0f} km2",
             file=sys.stderr,
         )
@@ -102,7 +117,9 @@ def _build(args) -> int:
         info["height_mm"] = max(info["height_mm"], frame_h)
     bmesh = None
     building_credit = (
-        OVERTURE_ATTRIBUTION if args.building_source == "overture" else OSM_ATTRIBUTION
+        OVERTURE_ATTRIBUTION
+        if args.buildings and args.building_source == "overture"
+        else OSM_ATTRIBUTION
     )
     if args.buildings:
         assert hm.bbox is not None
@@ -127,6 +144,27 @@ def _build(args) -> int:
             info["height_mm"] = max(
                 info["height_mm"], float(bmesh.vertices[:, 2].max())
             )
+    if args.bridges:
+        assert hm.bbox is not None
+        print("fetching bridges ...", file=sys.stderr)
+        tiles = VectorTileClient().tiles(hm.bbox, stage="bridges")
+        brmesh = bridge_mesh(
+            *bridges_from_vector_tiles(tiles),
+            water_from_vector_tiles(tiles),
+            hm.bbox,
+            relief,
+            info["width_mm"],
+            info["depth_mm"],
+            params.base_mm,
+            info["mm_per_m_plan"],
+            pier_spacing_mm=args.bridge_piers,
+        )
+        info["bridges"] = brmesh.count
+        if brmesh.count:
+            info["height_mm"] = max(
+                info["height_mm"], float(brmesh.vertices[:, 2].max())
+            )
+            bmesh = merge_building_meshes(*(m for m in (bmesh, brmesh) if m))
     solid = merge_meshes(body, bmesh.as_mesh()) if bmesh and bmesh.count else body
     write_binary_stl(solid, args.output, name=args.name)
     info["triangles"] = solid.triangle_count
@@ -262,8 +300,8 @@ def main(argv=None) -> int:
     b.add_argument(
         "--3mf",
         dest="threemf",
-        help="also write a multi-color 3MF here: land, water, buildings and "
-        "border as separate parts (needs --bbox)",
+        help="also write a multi-color 3MF here: land, water, buildings "
+        "(and bridges) and border as separate parts (needs --bbox)",
     )
     b.add_argument(
         "--buildings",
@@ -275,6 +313,18 @@ def main(argv=None) -> int:
         type=float,
         default=1.0,
         help="building height multiplier; 1 = true proportion",
+    )
+    b.add_argument(
+        "--bridges",
+        action="store_true",
+        help="add bridges over water from OpenStreetMap (needs --bbox)",
+    )
+    b.add_argument(
+        "--bridge-piers",
+        type=float,
+        default=20.0,
+        metavar="MM",
+        help="longest distance between bridge piers in mm; 0 = no piers",
     )
     b.add_argument(
         "--building-source",

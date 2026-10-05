@@ -6,7 +6,7 @@
 |---|---|---|
 | Elevation | [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) | `~/.cache/satprint/tiles` |
 | Imagery (GLB texture) | Esri World Imagery | `~/.cache/satprint/imagery` |
-| Buildings and water | [OpenFreeMap](https://openfreemap.org) vector tiles, zoom 14, rebuilt from OSM about weekly | `~/.cache/satprint/vtiles` |
+| Buildings, bridges and water | [OpenFreeMap](https://openfreemap.org) vector tiles, zoom 14, rebuilt from OSM about weekly | `~/.cache/satprint/vtiles` |
 | Buildings, fallback; roof shapes | [Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API), 0.01° tiles | `~/.cache/satprint/osm` |
 | Buildings, optional | [Overture Maps](https://overturemaps.org) GeoParquet on S3, per release | `~/.cache/satprint/overture` |
 | Place search | [Nominatim](https://nominatim.org), one request per second | in memory |
@@ -44,11 +44,46 @@ of the same area downloads nothing.
   published dimensions, matched by their Wikidata ID or OSM ID
   (`satprint/landmarks.py`). So far: the Sphere in Las Vegas, a 157 m sphere
   cut by the ground at 112 m.
+- Landmarks that a prism cannot express supply a closed triangle mesh and are
+  placed by a fixed position instead: the Gateway Arch in St. Louis, the Eiffel
+  Tower in Paris (four legs, open between them, up to the second platform) and
+  the Space Needle in Seattle and Christ the Redeemer in Rio de Janeiro (OSM
+  maps the statue as a single point, so it is placed by that point). They replace the buildings OSM maps under
+  them, and only when the whole landmark lies inside the area; a landmark cut
+  by the edge keeps the OSM buildings. The Arch and the Needle honor the
+  minimum feature size, so thin parts are thickened on small prints; the
+  Eiffel Tower keeps its true proportions. Christ the Redeemer is enlarged in
+  proportion on city-sized prints, until its arms reach the minimum, so it
+  stands taller than life, as a symbol on a map does. The Arch, the Needle's
+  saucer and the Eiffel Tower's archways are overhangs that may want slicer
+  supports.
 - Overlapping footprints are merged first: each overlap takes the tallest
   height covering it, so the solids touch but never pass through each other.
 - Buildings sink 0.3 mm into the terrain so they fuse with it when sliced.
 - A building that crosses a vector-tile edge arrives as two solids that meet at
   the edge.
+
+### Bridges
+
+Bridges come from the same OpenFreeMap tiles as buildings: `man_made=bridge`
+outlines, and road, rail and path lines tagged as bridges, which are drawn as
+strips of a width per class (a motorway 12 m, a path 3 m, never narrower than
+0.8 mm in the model). Only bridges over water from the tiles' water layer are
+built.
+
+- Each bridge is cut to the water plus a landing of about 30 m, at least 1 mm,
+  on each bank, so long approaches and interchanges are left out.
+- OSM has no deck heights. A landing is flat at the highest ground under it
+  plus 0.2 mm. Over the water the deck height blends the landings' heights by
+  distance, and rises to at least 1 mm above the water, easing in over 3 mm
+  from the banks, so a low bridge arches.
+- The span is a thin deck slab 0.6 mm thick, open underneath, held up by piers
+  1 mm thick at even spacing, no farther apart than `--bridge-piers` (20 mm by
+  default). They are not the real piers. There are no towers or cables.
+- Every part is a closed solid that touches the others only along shared
+  vertical faces. Landings and piers sink 0.3 mm into the terrain. Bridges
+  join the buildings solids, in the STL, the GLB and the 3MF.
+- A deck between its piers is an overhang that may want slicer supports.
 
 ### Overpass
 
@@ -88,8 +123,10 @@ the imagery. Set `"texture": false` to skip it.
   helps.
 - Elevation and imagery downloads are capped at 64 tiles per request. Shrink
   the area or lower the resolution if you hit the cap.
-- Buildings are limited to areas up to 40 km², and very small footprints are
-  dropped.
+- Buildings and bridges are limited to areas up to 40 km², and very small
+  footprints are dropped.
+- Bridges over water only. A bridge over a road, a railway or a valley is
+  missing, and so is one whose water is not in the tiles' water layer.
 - The multi-color split works one grid cell at a time, so a river narrower than
   a cell does not show.
 - The GLB is for viewing. FDM slicers ignore textures, so print the STL or the
@@ -101,6 +138,6 @@ the imagery. Set `"texture": false` to skip it.
 
 Terrain Tiles © Mapzen and AWS Open Data (SRTM, ASTER GDEM, GMTED2010, ETOPO1,
 NED, EU-DEM and others). Imagery © Esri, Maxar, Earthstar Geographics. Street
-map, buildings, water and search © OpenStreetMap contributors, under the ODbL.
+map, buildings, bridges, water and search © OpenStreetMap contributors, under the ODbL.
 Overture buildings © Overture Maps Foundation and OpenStreetMap contributors,
 under the ODbL.

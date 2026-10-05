@@ -13,9 +13,10 @@ from satprint.mesh import (
     heightmap_to_mesh,
     write_3mf,
 )
-from satprint.terrain import BBox
+from satprint.terrain import BBox, Heightmap
 from satprint.water import (
     _fix_diagonals,
+    level_water,
     water_from_vector_tiles,
     water_mask,
     water_zoom,
@@ -150,3 +151,58 @@ def test_3mf_is_one_object_of_named_colored_parts():
     ]
     with pytest.raises(ValueError):
         write_3mf([("x", empty, "#000000")])
+
+
+def _lake_heightmap():
+    """A 40 m plain over tile (14, 4824, 6157) with a lake reading 90 m."""
+    n = 2**14
+    x, y = 4824, 6157
+    west, east = x / n * 360 - 180, (x + 1) / n * 360 - 180
+
+    def lat(row):
+        return float(np.degrees(np.arctan(np.sinh(np.pi * (1 - 2 * row / n)))))
+
+    bbox = BBox(lat(y + 1), west, lat(y), east)
+    data = np.full((65, 65), 40.0, dtype=np.float32)
+    data[20:45, 20:45] = 90.0  # the lake, as the data has it
+    return Heightmap(data, 800.0, 800.0, "test", bbox)
+
+
+def _lake_tile(water_class):
+    # the lake is the tile's middle third, a little larger than the 90 m patch
+    return [
+        (
+            14,
+            4824,
+            6157,
+            encode_tile(
+                [
+                    {
+                        "geometry": box(1100, 1100, 3100, 3100),
+                        "properties": {"class": water_class},
+                    }
+                ],
+                layer="water",
+            ),
+        )
+    ]
+
+
+def test_level_water_sets_a_lake_to_its_shore():
+    hm = _lake_heightmap()
+    out = level_water(hm, _lake_tile("lake"))
+    assert out is not hm and hm.data.max() == 90.0  # the input is not modified
+    assert out.data[30, 30] == pytest.approx(40.0)
+    assert (out.data <= hm.data).all()  # only ever lowered
+    assert out.data.max() == pytest.approx(40.0)
+
+
+def test_level_water_leaves_rivers_and_flat_lakes_alone():
+    hm = _lake_heightmap()
+    assert level_water(hm, _lake_tile("river")) is hm
+    flat = Heightmap(np.full((65, 65), 40.0, np.float32), 800.0, 800.0, "t", hm.bbox)
+    assert level_water(flat, _lake_tile("lake")) is flat
+    assert (
+        level_water(Heightmap(hm.data, 800.0, 800.0, "t"), _lake_tile("lake")).bbox
+        is None
+    )

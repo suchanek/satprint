@@ -15,8 +15,8 @@ authors:
     orcid: "https://orcid.org/0009-0009-0891-1507"
     email: suchanek@flux-frontiers.com
     affiliation: "Flux-Frontiers"
-version: "0.2.1"
-date-released: "2026-10-02"
+version: "0.3.0"
+date-released: "2026-10-05"
 # The Zenodo concept DOI, which resolves to the newest archived release.
 doi: "10.5281/zenodo.23094151"
 license: MIT

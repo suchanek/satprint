@@ -6,20 +6,7 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Fixed
-
-- **3D preview zoom.** Scroll and pinch zoom in proportion to the gesture. The
-  controls library's own wheel zoom is divided by the device pixel ratio, and
-  Safari reports a trackpad pinch as gesture events it ignored.
-- **Presets set the Bridges checkbox** along with the buildings one, so a
-  mountain preset no longer carries over an area too large for bridges.
-- **Lakes printed as raised plateaus.** Elevation data over water is noisy, and
-  a lake in a steep valley, such as the Lagoa in Rio, can read tens of meters
-  above its shore. Each lake, pond, reservoir and sea surface is now set to the
-  lower shore of its own outline (the 10th percentile of the ground around it),
-  using the water layer of the vector tiles. It only ever lowers the data, so a
-  lake the data shows flat is unchanged, and rivers are left alone. If the
-  tiles are unavailable the data is used as it is.
+## [0.3.0] - 2026-10-05
 
 ### Added
 
@@ -59,6 +46,21 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   2 km each.
 - **On PyPI**: `pip install satprint`, first uploaded at 0.2.1. Tag pushes
   now publish to PyPI through trusted publishing, after the GitHub Release.
+
+### Fixed
+
+- **3D preview zoom.** Scroll and pinch zoom in proportion to the gesture. The
+  controls library's own wheel zoom is divided by the device pixel ratio, and
+  Safari reports a trackpad pinch as gesture events it ignored.
+- **Presets set the Bridges checkbox** along with the buildings one, so a
+  mountain preset no longer carries over an area too large for bridges.
+- **Lakes printed as raised plateaus.** Elevation data over water is noisy, and
+  a lake in a steep valley, such as the Lagoa in Rio, can read tens of meters
+  above its shore. Each lake, pond, reservoir and sea surface is now set to the
+  lower shore of its own outline (the 10th percentile of the ground around it),
+  using the water layer of the vector tiles. It only ever lowers the data, so a
+  lake the data shows flat is unchanged, and rivers are left alone. If the
+  tiles are unavailable the data is used as it is.
 
 ## [0.2.1] - 2026-10-02
 

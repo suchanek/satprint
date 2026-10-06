@@ -72,6 +72,19 @@ without `--buildings`.
 
 The build reports the number of bridges as `bridges`.
 
+### Roads
+
+These need `--bbox` and the same area limit as buildings, and work with or
+without `--buildings`. With buildings on, roads stop at the building
+footprints.
+
+| Option | Default | Meaning |
+|---|---|---|
+| `--roads` | off | Add OpenStreetMap roads as raised strips on the terrain |
+| `--road-detail` | `auto` | `auto` (classes by model scale), `major` (motorway to secondary) or `all` |
+
+The build reports the number of connected road networks as `roads`.
+
 ### Output
 
 | Option | Meaning |
@@ -97,6 +110,10 @@ satprint build --bbox 40.7414 -73.9997 40.7684 -73.9683 --width 150 \
 
 # The Golden Gate Bridge, with piers at most 20 mm apart
 satprint build --bbox 37.805 -122.490 37.835 -122.465 --bridges -o golden-gate.stl
+
+# San Francisco with buildings and roads, roads as their own 3MF part
+satprint build --bbox 37.745 -122.45 37.775 -122.41 --width 150 --buildings \
+               --roads --3mf sf.3mf -o sf.stl
 
 # Venice as a four-color 3MF: land, water, buildings and a 5 mm border frame
 satprint build --bbox 45.43 12.32 45.446 12.343 --buildings --frame 5 \

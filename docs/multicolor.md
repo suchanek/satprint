@@ -1,6 +1,6 @@
 # Print in several colors
 
-The multi-color 3MF holds up to four parts of one object, in this filament
+The multi-color 3MF holds up to five parts of one object, in this filament
 order:
 
 | Filament | Part | Display color |
@@ -8,11 +8,13 @@ order:
 | 1 | `land` | green |
 | 2 | `water` | blue |
 | 3 | `buildings` | white |
-| 4 | `border` | dark gray |
+| 4 | `roads` | dark gray |
+| 5 | `border` | dark gray |
 
-Bridges share the `buildings` part. Parts without geometry are left out:
-there is no `buildings` part without buildings or bridges, and no `border`
-part without a frame.
+Bridges share the `buildings` part. Parts without geometry are left out, and
+the parts after them move up a filament: there is no `buildings` part without
+buildings or bridges, no `roads` part without roads, and no `border` part
+without a frame.
 
 ## Make one
 
@@ -57,5 +59,7 @@ filaments by hand.
 - **Buildings** are the same solids as in the STL, sunk 0.3 mm into the
   terrain. Slicers resolve that overlap. Bridges are in this part too, so a
   bridge prints in the buildings filament.
+- **Roads** are the same raised strips as in the STL, sunk 0.3 mm into the
+  terrain like the buildings.
 - **Border** is a closed rectangular ring against the walls of the block, 1 mm
   above the base by default.

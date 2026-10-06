@@ -31,6 +31,7 @@ PART_COLORS = {
     "land": "#8A9A5B",
     "water": "#2F6FB3",
     "buildings": "#E8E8E8",
+    "roads": "#4A4A4A",
     "border": "#3A3A3A",
 }
 
@@ -183,11 +184,13 @@ def multicolor_parts(
     sea_level_flat: bool = False,
     buildings: BuildingMesh | None = None,
     frame: Mesh | None = None,
+    roads: BuildingMesh | None = None,
 ) -> tuple[list[tuple[str, Mesh, str]], np.ndarray]:
-    """The 3MF parts, land, water, buildings and border, and the water mask.
+    """The 3MF parts, land, water, buildings, roads and border, and the water
+    mask.
 
     Parts without geometry are left out, so the filament numbers stay in this
-    order: land 1, water 2, then buildings and border as present.
+    order: land 1, water 2, then buildings, roads and border as present.
 
     :return: ([(name, mesh, color), ...] for :func:`write_3mf`, mask).
     """
@@ -199,6 +202,8 @@ def multicolor_parts(
     ]
     if buildings is not None and buildings.count:
         parts.append(("buildings", buildings.as_mesh(), PART_COLORS["buildings"]))
+    if roads is not None and roads.count:
+        parts.append(("roads", roads.as_mesh(), PART_COLORS["roads"]))
     if frame is not None:
         parts.append(("border", frame, PART_COLORS["border"]))
     return parts, mask

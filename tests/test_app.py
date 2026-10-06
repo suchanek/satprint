@@ -88,7 +88,7 @@ class FakeVectorTiles(VectorTileClient):
                     ]
                     out.append((zoom, tx, ty, encode_tile(feats, layer="water")))
                     continue
-                if stage == "bridges":
+                if stage in ("bridges", "roads"):
                     # a river across every tile and a road over it
                     out.append(
                         encode(
@@ -165,6 +165,12 @@ def test_index_and_presets(client):
     )
     assert len({p["name"] for p in presets}) == len(presets)
     assert client.get("/static/app.js").status_code == 200
+
+
+def test_page_is_revalidated_but_api_is_not(client):
+    assert client.get("/").headers["cache-control"] == "no-cache"
+    assert client.get("/static/app.js").headers["cache-control"] == "no-cache"
+    assert "cache-control" not in client.get("/api/presets").headers
 
 
 def test_synthetic_model_and_download(client):
@@ -425,6 +431,44 @@ def test_bridge_problems_do_not_fail_the_model(client):
     r = client.post("/api/model", json={**base, "bbox": big, "bridges": True})
     assert r.status_code == 200
     assert "limited to 40 km2" in r.json()["info"]["bridge_error"]
+
+
+ROAD_AREA = {"south": 40.75, "west": -73.99, "north": 40.768, "east": -73.968}
+
+
+def test_roads_are_added_to_the_stl_and_3mf():
+    import zipfile
+
+    vt = FakeVectorTiles()
+    client = make_client(vector_tiles=vt)
+    base = {"source": "terrarium", "resolution": 64, "bbox": ROAD_AREA}
+    plain = client.post("/api/model", json={**base, "texture": False}).json()
+    assert "roads" not in plain["info"]
+    body = {**base, "roads": True, "road_detail": "major", "multicolor": True}
+    j = client.post("/api/model", json=body).json()
+    info = j["info"]
+    assert info["roads"] >= 1
+    assert info["triangles"] > plain["info"]["triangles"]
+    assert info["multicolor_parts"] == ["land", "water", "roads"]
+    doc, _ = read_glb(client.get(j["glb_url"]).content)
+    assert "OpenStreetMap" in doc["asset"]["copyright"]
+    with zipfile.ZipFile(io.BytesIO(client.get(j["threemf_url"]).content)) as z:
+        assert 'name="roads"' in z.read("3D/3dmodel.model").decode()
+    # roads are cached by area
+    calls = vt.calls
+    client.post("/api/model", json={**body, "multicolor": False, "texture": False})
+    assert vt.calls == calls
+
+
+def test_road_problems_do_not_fail_the_model(client):
+    base = {"source": "terrarium", "resolution": 64, "bbox": BRIDGE_ERROR_AREA}
+    r = client.post("/api/model", json={**base, "roads": True})  # tiles fail
+    assert r.status_code == 200, r.text
+    info = r.json()["info"]
+    assert "unreachable" in info["road_error"] and "roads" not in info
+    big = {"south": 45.0, "west": 7.0, "north": 45.2, "east": 7.3}
+    r = client.post("/api/model", json={**base, "bbox": big, "roads": True})
+    assert "limited to 40 km2" in r.json()["info"]["road_error"]
 
 
 def test_search(client):

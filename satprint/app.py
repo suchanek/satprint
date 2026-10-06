@@ -44,6 +44,7 @@ from .osm import (
     fetch_buildings,
 )
 from .presets import presets as all_presets
+from .roads import road_mesh, roads_from_vector_tiles
 from .terrain import (
     IMAGERY_ATTRIBUTION,
     BBox,
@@ -133,6 +134,7 @@ imagery_cache = _LRU(16)  # bbox key -> (JPEG bytes, meta)
 water_cache = _LRU(16)  # bbox key -> list of water polygons
 buildings_cache = _LRU(16)  # bbox key -> list[Building]
 bridges_cache = _LRU(16)  # bbox key -> (bridge features, water polygons)
+roads_cache = _LRU(16)  # bbox key -> (road lines, water polygons)
 upload_store = _LRU(16)  # upload_id -> Heightmap
 model_store = _LRU(32)  # model_id -> StoredModel
 
@@ -186,6 +188,15 @@ class ModelRequest(BaseModel):
     )
     bridge_piers_mm: float = Field(
         20.0, ge=0, le=1000, description="longest distance between piers; 0 = none"
+    )
+    roads: bool = Field(
+        False,
+        description="add OpenStreetMap roads as raised strips (terrarium source only)",
+    )
+    road_detail: Literal["auto", "major", "all"] = Field(
+        "auto",
+        description="which roads: auto (by model scale), major (motorway to "
+        "secondary) or all",
     )
     frame_mm: float = Field(
         0.0, ge=0, le=30, description="border frame width around the model; 0 = none"
@@ -254,6 +265,16 @@ def create_app(
             tiles = vtiles.tiles(bbox, progress=progress, stage="bridges")
             hit = (bridges_from_vector_tiles(tiles), water_from_vector_tiles(tiles))
             bridges_cache.put(key, hit)
+        return hit
+
+    def _roads_for(bbox: BBox, progress: Progress | None = None) -> tuple[list, list]:
+        """Road lines and water polygons in ``bbox``."""
+        key = _bbox_key(bbox)
+        hit = roads_cache.get(key)
+        if hit is None:
+            tiles = vtiles.tiles(bbox, progress=progress, stage="roads")
+            hit = (roads_from_vector_tiles(tiles), water_from_vector_tiles(tiles))
+            roads_cache.put(key, hit)
         return hit
 
     geo = geocoder or Geocoder()
@@ -442,6 +463,7 @@ def create_app(
             )
         rows, cols = relief.shape
         bmesh: BuildingMesh | None = None
+        footprints: list = []  # roads stop at the buildings
         building_info: dict = {}
         if req.buildings and hm.bbox is not None:
             area = bbox_area_km2(hm.bbox)
@@ -459,6 +481,7 @@ def create_app(
                 except Exception as exc:
                     building_info["building_error"] = f"building download failed: {exc}"
                 else:
+                    footprints = [b.footprint for b in found]
                     bmesh = building_mesh(
                         found,
                         hm.bbox,
@@ -518,10 +541,45 @@ def create_app(
                         bmesh = merge_building_meshes(
                             *(m for m in (bmesh, brmesh) if m)
                         )
+        rmesh: BuildingMesh | None = None
+        if req.roads and hm.bbox is not None:
+            area = bbox_area_km2(hm.bbox)
+            # Nor a road failure.
+            if area > MAX_BUILDING_AREA_KM2:
+                building_info["road_error"] = (
+                    f"area is {area:.0f} km2; roads are limited to "
+                    f"{MAX_BUILDING_AREA_KM2:.0f} km2"
+                )
+            else:
+                try:
+                    lines, water = _roads_for(hm.bbox, progress)
+                except Exception as exc:
+                    building_info["road_error"] = f"road download failed: {exc}"
+                else:
+                    if progress:
+                        progress("road mesh", 0, 0)
+                    rmesh = road_mesh(
+                        lines,
+                        water,
+                        footprints,
+                        hm.bbox,
+                        relief,
+                        info["width_mm"],
+                        info["depth_mm"],
+                        params.base_mm,
+                        info["mm_per_m_plan"],
+                        detail=req.road_detail,
+                    )
+                    building_info["roads"] = rmesh.count
+                    if rmesh.count:
+                        top = float(rmesh.vertices[:, 2].max())
+                        info["height_mm"] = max(info["height_mm"], top)
+        # buildings, bridges and roads: everything standing on the terrain
+        extras = merge_building_meshes(*(m for m in (bmesh, rmesh) if m))
         credit = building_info.get("building_attribution", OSM_ATTRIBUTION)
         if progress:
             progress("writing files", 0, 0)
-        solid = merge_meshes(body, bmesh.as_mesh()) if bmesh and bmesh.count else body
+        solid = merge_meshes(body, extras.as_mesh()) if extras.count else body
         stl = write_binary_stl(solid, name=req.name)
         png = heightmap_png(hm, params.clamp_sea_level)
         threemf = None
@@ -544,10 +602,13 @@ def create_app(
                 sea_level_flat=params.clamp_sea_level and info["min_elev_m"] <= 0,
                 buildings=bmesh,
                 frame=frame,
+                roads=rmesh,
             )
             sources = [OSM_ATTRIBUTION] if polygons else []
             if bmesh and bmesh.count:
                 sources.append(credit)
+            if rmesh and rmesh.count:
+                sources.append(OSM_ATTRIBUTION)
             credits = "; ".join(dict.fromkeys(sources)) or None
             threemf = write_3mf(parts, name=req.name, attribution=credits)
             multicolor_info.update(
@@ -569,6 +630,8 @@ def create_app(
                 credits = IMAGERY_ATTRIBUTION
                 if bmesh and bmesh.count:
                     credits += "; " + credit
+                if rmesh and rmesh.count and OSM_ATTRIBUTION not in credits:
+                    credits += "; " + OSM_ATTRIBUTION
                 glb = write_glb(
                     body,
                     rows,
@@ -576,7 +639,7 @@ def create_app(
                     jpeg,
                     name=req.name,
                     copyright=credits,
-                    buildings=bmesh,
+                    buildings=extras,
                 )
                 texture_info = {
                     "textured": True,
@@ -698,6 +761,16 @@ def create_app(
         return FileResponse(os.path.join(STATIC_DIR, "index.html"))
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+    @app.middleware("http")
+    async def revalidate_page(request, call_next):
+        """Have browsers check the page and its files each time, so a new
+        version shows on a plain reload; unchanged files come back as 304."""
+        response = await call_next(request)
+        if request.url.path == "/" or request.url.path.startswith("/static/"):
+            response.headers["Cache-Control"] = "no-cache"
+        return response
+
     return app
 
 

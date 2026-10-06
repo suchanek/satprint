@@ -8,6 +8,7 @@ Usage:
     satprint build --bbox S W N E --buildings [--building-scale 2] -o city.stl
     satprint build --bbox S W N E --buildings --frame 5 --3mf city.3mf -o city.stl
     satprint build --bbox S W N E --bridges [--bridge-piers 20] -o bay.stl
+    satprint build --bbox S W N E --buildings --roads [--road-detail major] -o city.stl
     satprint build --synthetic -o demo.stl
     satprint build --file dem.tif --ground-width 15000 -o model.stl
 """
@@ -42,6 +43,7 @@ from .osm import (
     VectorTileClient,
     fetch_buildings,
 )
+from .roads import road_mesh, roads_from_vector_tiles
 from .terrain import (
     IMAGERY_ATTRIBUTION,
     BBox,
@@ -77,19 +79,21 @@ def _build(args) -> int:
     else:
         print("error: give --bbox, --file or --synthetic", file=sys.stderr)
         return 2
-    if (args.glb or args.buildings or args.bridges or args.threemf) and hm.bbox is None:
+    if (
+        args.glb or args.buildings or args.bridges or args.roads or args.threemf
+    ) and hm.bbox is None:
         print(
-            "error: --glb, --buildings, --bridges and --3mf need --bbox",
+            "error: --glb, --buildings, --bridges, --roads and --3mf need --bbox",
             file=sys.stderr,
         )
         return 2
     if (
-        (args.buildings or args.bridges)
+        (args.buildings or args.bridges or args.roads)
         and hm.bbox
         and bbox_area_km2(hm.bbox) > MAX_BUILDING_AREA_KM2
     ):
         print(
-            f"error: --buildings and --bridges are limited to "
+            f"error: --buildings, --bridges and --roads are limited to "
             f"{MAX_BUILDING_AREA_KM2:.0f} km2; "
             f"this area is {bbox_area_km2(hm.bbox):.0f} km2",
             file=sys.stderr,
@@ -116,6 +120,7 @@ def _build(args) -> int:
         info["outer_depth_mm"] = info["depth_mm"] + 2 * args.frame
         info["height_mm"] = max(info["height_mm"], frame_h)
     bmesh = None
+    footprints = []  # roads stop at the buildings
     building_credit = (
         OVERTURE_ATTRIBUTION
         if args.buildings and args.building_source == "overture"
@@ -129,6 +134,7 @@ def _build(args) -> int:
         )
         if warning:
             print(f"warning: {warning}", file=sys.stderr)
+        footprints = [b.footprint for b in found]
         bmesh = building_mesh(
             found,
             hm.bbox,
@@ -165,7 +171,31 @@ def _build(args) -> int:
                 info["height_mm"], float(brmesh.vertices[:, 2].max())
             )
             bmesh = merge_building_meshes(*(m for m in (bmesh, brmesh) if m))
-    solid = merge_meshes(body, bmesh.as_mesh()) if bmesh and bmesh.count else body
+    rmesh = None
+    if args.roads:
+        assert hm.bbox is not None
+        print("fetching roads ...", file=sys.stderr)
+        tiles = VectorTileClient().tiles(hm.bbox, stage="roads")
+        rmesh = road_mesh(
+            roads_from_vector_tiles(tiles),
+            water_from_vector_tiles(tiles),
+            footprints,
+            hm.bbox,
+            relief,
+            info["width_mm"],
+            info["depth_mm"],
+            params.base_mm,
+            info["mm_per_m_plan"],
+            detail=args.road_detail,
+        )
+        info["roads"] = rmesh.count
+        if rmesh.count:
+            info["height_mm"] = max(
+                info["height_mm"], float(rmesh.vertices[:, 2].max())
+            )
+    # buildings, bridges and roads: everything standing on the terrain
+    extras = merge_building_meshes(*(m for m in (bmesh, rmesh) if m))
+    solid = merge_meshes(body, extras.as_mesh()) if extras.count else body
     write_binary_stl(solid, args.output, name=args.name)
     info["triangles"] = solid.triangle_count
     info["volume_cm3"] = solid.volume_mm3() / 1000
@@ -185,9 +215,14 @@ def _build(args) -> int:
                     cols,
                     buf.getvalue(),
                     name=args.name,
-                    copyright=IMAGERY_ATTRIBUTION
-                    + ("; " + building_credit if bmesh and bmesh.count else ""),
-                    buildings=bmesh,
+                    copyright="; ".join(
+                        dict.fromkeys(
+                            [IMAGERY_ATTRIBUTION]
+                            + ([building_credit] if bmesh and bmesh.count else [])
+                            + ([OSM_ATTRIBUTION] if rmesh and rmesh.count else [])
+                        )
+                    ),
+                    buildings=extras,
                 )
             )
         info["texture_meta"] = meta
@@ -206,6 +241,7 @@ def _build(args) -> int:
             sea_level_flat=params.clamp_sea_level and info["min_elev_m"] <= 0,
             buildings=bmesh,
             frame=frame,
+            roads=rmesh,
         )
         with open(args.threemf, "wb") as fh:
             credits = [OSM_ATTRIBUTION]  # the water
@@ -301,12 +337,23 @@ def main(argv=None) -> int:
         "--3mf",
         dest="threemf",
         help="also write a multi-color 3MF here: land, water, buildings "
-        "(and bridges) and border as separate parts (needs --bbox)",
+        "(and bridges), roads and border as separate parts (needs --bbox)",
     )
     b.add_argument(
         "--buildings",
         action="store_true",
         help="add OpenStreetMap buildings (needs --bbox)",
+    )
+    b.add_argument(
+        "--roads",
+        action="store_true",
+        help="add OpenStreetMap roads as raised strips (needs --bbox)",
+    )
+    b.add_argument(
+        "--road-detail",
+        choices=["auto", "major", "all"],
+        default="auto",
+        help="which roads: auto (by model scale), major (motorway to secondary) or all",
     )
     b.add_argument(
         "--building-scale",

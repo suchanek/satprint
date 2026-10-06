@@ -99,7 +99,14 @@
       <label class="switch"><input type="checkbox" id="texture" checked> Drape satellite imagery (GLB, satellite elevation only)</label>
       <label class="switch"><input type="checkbox" id="buildings"> Add buildings from OpenStreetMap (areas up to 40 km²)</label>
       <label class="switch"><input type="checkbox" id="bridges"> Add bridges over water from OpenStreetMap (areas up to 40 km²)</label>
-      <label class="switch"><input type="checkbox" id="multicolor"> Multi-color 3MF: land, water, buildings and border as separate parts (multi-material printers)</label>
+      <label class="switch"><input type="checkbox" id="roads"> Add roads from OpenStreetMap as raised strips (areas up to 40 km²)</label>
+      <label>Road detail
+        <select id="road_detail">
+          <option value="auto" selected>Auto, by model scale</option>
+          <option value="major">Major roads only</option>
+          <option value="all">All roads and paths</option>
+        </select></label>
+      <label class="switch"><input type="checkbox" id="multicolor"> Multi-color 3MF: land, water, buildings, roads and border as separate parts (multi-material printers)</label>
       <label>Border frame <span class="unit">mm wide, 0 = none</span>
         <input type="number" id="frame_mm" min="0" max="30" step="0.5" value="0"></label>
       <label>Frame height <span class="unit">mm, blank = base + 1</span>

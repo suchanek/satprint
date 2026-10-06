@@ -85,10 +85,10 @@ function updateAreaHint() {
   const km = (m) => (m / 1000).toFixed(1);
   const width = +$("width_mm").value || 100;
   const km2 = w * h / 1e6;
-  const tooBig = ($("buildings").checked || $("bridges").checked) && km2 > MAX_BUILDING_KM2;
+  const tooBig = ($("buildings").checked || $("bridges").checked || $("roads").checked) && km2 > MAX_BUILDING_KM2;
   $("area-hint").textContent =
     `Area ≈ ${km(w)} × ${km(h)} km  →  model ${fmt(width, 0)} × ${fmt(width * h / w, 0)} mm  (plan scale 1:${fmt(w / width * 1000, 0)})` +
-    (tooBig ? `  ·  too large for buildings and bridges (${fmt(km2, 0)} km², limit ${MAX_BUILDING_KM2})` : "");
+    (tooBig ? `  ·  too large for buildings, bridges and roads (${fmt(km2, 0)} km², limit ${MAX_BUILDING_KM2})` : "");
   $("area-hint").className = "hint" + (tooBig ? " error" : "");
 }
 ["south", "west", "north", "east"].forEach((id) => $(id).addEventListener("change", () => setBBox(bboxFromInputs(), { fit: true })));
@@ -168,6 +168,7 @@ $("presets").addEventListener("change", (e) => {
 });
 $("buildings").addEventListener("change", updateAreaHint);
 $("bridges").addEventListener("change", updateAreaHint);
+$("roads").addEventListener("change", updateAreaHint);
 
 // place search (Nominatim, through the server)
 function squareAround(lat, lon, km) {
@@ -377,6 +378,8 @@ const STAGE_LABELS = {
   "building mesh": "Building solids",
   bridges: "Bridge data tiles",
   "bridge mesh": "Bridge solids",
+  roads: "Road data tiles",
+  "road mesh": "Road solids",
   "terrain mesh": "Terrain mesh",
   imagery: "Imagery tiles",
   water: "Water data tiles",
@@ -419,6 +422,7 @@ $("btn-generate").addEventListener("click", async () => {
     smoothing: +$("smoothing").value, clamp_sea_level: $("clamp").checked, texture: $("texture").checked,
     buildings: $("buildings").checked, building_scale: +$("building_scale").value || 1,
     bridges: $("bridges").checked, building_source: $("building_source").value, multicolor: $("multicolor").checked,
+    roads: $("roads").checked, road_detail: $("road_detail").value,
     frame_mm: +$("frame_mm").value || 0,
     frame_height_mm: $("frame_height_mm").value ? +$("frame_height_mm").value : null,
     name: $("name").value || "terrain",
@@ -443,6 +447,7 @@ $("btn-generate").addEventListener("click", async () => {
       ["Source", i.source + (i.source_meta?.zoom != null ? ` (zoom ${i.source_meta.zoom}, ${i.source_meta.tiles} tiles)` : "")],
       ...(i.buildings != null ? [["Buildings", `${fmt(i.buildings, 0)} (${{ openfreemap: "OpenStreetMap via OpenFreeMap", overpass: "OpenStreetMap via Overpass", overture: "Overture Maps" }[i.building_source] || i.building_source})`]] : []),
       ...(i.bridges != null ? [["Bridges", fmt(i.bridges, 0)]] : []),
+      ...(i.roads != null ? [["Road networks", fmt(i.roads, 0)]] : []),
       ...(i.multicolor_parts ? [["Multi-color", `${i.multicolor_parts.join(", ")} (${fmt(i.water_fraction * 100, 0)} % water)`]] : []),
       ...(i.textured ? [["Texture", `${i.texture_meta.px[1]} × ${i.texture_meta.px[0]} px (zoom ${i.texture_meta.zoom}, ${i.texture_meta.tiles} tiles)`]] : []),
     ].map(([k, v]) => `<dt>${k}</dt><dd>${v}</dd>`).join("");
@@ -470,6 +475,7 @@ $("btn-generate").addEventListener("click", async () => {
       i.building_error && `No buildings: ${i.building_error}`,
       i.building_warning && `Buildings: ${i.building_warning}`,
       i.bridge_error && `No bridges: ${i.bridge_error}`,
+      i.road_error && `No roads: ${i.road_error}`,
     ].filter(Boolean);
     status(`Done in ${i.generate_seconds}s.` + (problems.length ? " " + problems.join(" ") : ""), problems.length ? "error" : "ok");
   } catch (err) {

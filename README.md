@@ -64,8 +64,11 @@ exaggeration:
   or Overture Maps.
 - **Bridges** over water from OpenStreetMap, as a raised deck on evenly spaced
   piers, in the STL, GLB and 3MF. Deck heights are estimated from the banks.
-- **Multi-color 3MF.** Land, water, buildings and an optional border frame are
-  separate parts of one object, already on filaments 1 to 4 in Bambu Studio.
+- **Roads** from OpenStreetMap, as raised strips that follow the terrain, in
+  the STL, GLB and 3MF. Which roads are drawn depends on the model scale.
+- **Multi-color 3MF.** Land, water, buildings, roads and an optional border
+  frame are separate parts of one object, already on filaments 1 to 5 in
+  Bambu Studio.
   Water is the OSM sea, rivers and lakes, plus the flattened sea.
 - **Border frame.** A rectangular rim around the model, 1 mm above the base by
   default, in the STL, GLB and 3MF.
@@ -161,6 +164,10 @@ satprint build --bbox 40.7414 -73.9997 40.7684 -73.9683 --width 150 \
 # The Golden Gate Bridge, with piers at most 20 mm apart
 satprint build --bbox 37.805 -122.490 37.835 -122.465 --bridges -o golden-gate.stl
 
+# San Francisco with buildings and roads, roads as their own 3MF part
+satprint build --bbox 37.745 -122.45 37.775 -122.41 --width 150 --buildings \
+               --roads --3mf sf.3mf -o sf.stl
+
 # Venice as a four-color 3MF: land, water, buildings and a 5 mm border frame
 satprint build --bbox 45.43 12.32 45.446 12.343 --buildings --frame 5 \
                --3mf venice.3mf -o venice.stl
@@ -221,7 +228,7 @@ curl -s localhost:7417/api/model -H 'content-type: application/json' -d '{
 |---|---|---|
 | Elevation | [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) | `~/.cache/satprint/tiles` |
 | Imagery (GLB texture) | Esri World Imagery | `~/.cache/satprint/imagery` |
-| Buildings, bridges and water | [OpenFreeMap](https://openfreemap.org) vector tiles, zoom 14, rebuilt from OSM about weekly | `~/.cache/satprint/vtiles` |
+| Buildings, bridges, roads and water | [OpenFreeMap](https://openfreemap.org) vector tiles, zoom 14, rebuilt from OSM about weekly | `~/.cache/satprint/vtiles` |
 | Buildings, fallback; roof shapes | [Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API), 0.01° tiles | `~/.cache/satprint/osm` |
 | Buildings, optional | [Overture Maps](https://overturemaps.org) GeoParquet on S3, per release | `~/.cache/satprint/overture` |
 | Place search | [Nominatim](https://nominatim.org), one request per second | in memory |
@@ -239,6 +246,12 @@ curl -s localhost:7417/api/model -H 'content-type: application/json' -d '{
   heights over the water, at least 1 mm above it. The span is a thin slab, open
   underneath, on piers at even spacing; they are not the real piers, and there
   are no towers or cables. Areas are limited to 40 km², as with buildings.
+- **Roads.** Roads are raised 0.4 mm strips, at least 0.8 mm wide, so most
+  are drawn wider than they are. Minor classes are left out of large areas,
+  where they would cover the land. Roads stop at water and at buildings;
+  tunnels, rail and ferries are left out. Areas are limited to 40 km², as
+  with buildings. At 1024 grid columns a dense city's roads add about as many
+  triangles as the terrain.
 - **Roof shapes.** Roofs tagged `roof:shape` dome, onion, cone or pyramidal
   get that shape, from `roof:height` or `roof:levels`, else a hemisphere-like
   height from the footprint's size. Other roofs are flat. The vector tiles
@@ -290,6 +303,7 @@ satprint/
   mesh.py       heightmap to watertight solid, land/water split, frame, STL, GLB and 3MF writers
   buildings.py  OSM buildings to closed solids on the terrain, roof shapes
   bridges.py    OSM bridges over water to decks on piers
+  roads.py      OSM roads to raised strips draped on the terrain
   landmarks.py  exact shapes and meshes for a few landmarks
   overture.py   Overture Maps building source (overture extra)
   water.py      water map and the multi-color 3MF parts
@@ -332,7 +346,7 @@ MIT. See [LICENSE](https://github.com/suchanek/satprint/blob/main/LICENSE).
 
 Map data: Terrain Tiles © Mapzen and AWS Open Data (SRTM, ASTER GDEM, GMTED2010,
 ETOPO1, NED, EU-DEM and others). Imagery © Esri, Maxar, Earthstar Geographics.
-Street map, buildings, bridges, water and search © OpenStreetMap contributors,
+Street map, buildings, bridges, roads, water and search © OpenStreetMap contributors,
 under the ODbL. Overture buildings © Overture Maps Foundation and OpenStreetMap
 contributors, under the ODbL.
 

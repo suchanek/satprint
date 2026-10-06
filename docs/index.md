@@ -36,6 +36,11 @@ and the Golden Gate Bridge:
 
 ![Bridges over water](bridges.png)
 
+Roads are raised strips that follow the ground, here around Twin Peaks in San
+Francisco, printed in their own color from the 3MF:
+
+![Roads in San Francisco](roads.png)
+
 ## What it does
 
 - **Real elevation, no API key.** Elevation comes from the public AWS Terrain
@@ -51,8 +56,10 @@ and the Golden Gate Bridge:
   Towers keep their setbacks, and overlapping footprints are merged so no two
   solids pass through each other.
 - **Bridges** over water from OpenStreetMap, as a raised deck on piers.
-- **Four colors.** Land, water, buildings and a border frame are separate parts
-  of one 3MF object, already on filaments 1 to 4 in Bambu Studio.
+- **Roads** from OpenStreetMap, as raised strips that follow the terrain.
+- **Five colors.** Land, water, buildings, roads and a border frame are
+  separate parts of one 3MF object, already on filaments 1 to 5 in Bambu
+  Studio.
 - **Search and presets.** Search any place by name, or pick one of 70 presets:
   40 cities and landmarks and 30 mountains and landscapes.
 

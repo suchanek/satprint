@@ -6,6 +6,30 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- **Roads** (`roads: true`, `road_detail`, `--roads`, `--road-detail`, and a
+  Roads checkbox and Road detail selector in the web app), from the same
+  OpenFreeMap tiles as the buildings. Each road is a raised strip 0.4 mm above
+  the terrain and sunk 0.3 mm into it, drawn at a width per class but never
+  narrower than 0.8 mm, since a real street is a fraction of a nozzle wide at
+  print scale. The strips are cut along the terrain mesh's triangles, so they
+  follow the ground exactly, and each connected road network is one closed
+  solid. Water and building footprints are cut out of them; tunnels, rail and
+  ferries are left out. `road_detail` is `auto` (classes chosen by model
+  scale: major roads for a region, minor streets for a city, service roads
+  and paths under about 1 km across), `major` (motorway to secondary) or
+  `all`. Roads are in the STL and GLB and are their own `roads` part in the
+  3MF. The build reports `roads`, the number of connected road networks.
+  They share the 40 km2 limit with buildings. A failed download reports
+  `road_error` and keeps the STL.
+
+### Changed
+
+- **The page revalidates.** The web page and its files are served with
+  `Cache-Control: no-cache`, so a new version shows on a plain reload instead
+  of a cached copy. Unchanged files still come back as a 304.
+
 ## [0.3.0] - 2026-10-05
 
 ### Added

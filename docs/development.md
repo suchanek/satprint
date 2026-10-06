@@ -44,6 +44,7 @@ satprint/
   mesh.py       heightmap to watertight solid, land/water split, frame, STL, GLB and 3MF writers
   buildings.py  OSM buildings to closed solids on the terrain, roof shapes
   bridges.py    OSM bridges over water to decks on piers
+  roads.py      OSM roads to raised strips draped on the terrain
   landmarks.py  exact shapes and meshes for a few landmarks
   overture.py   Overture Maps building source (overture extra)
   water.py      water map and the multi-color 3MF parts

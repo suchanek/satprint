@@ -6,7 +6,7 @@
 |---|---|---|
 | Elevation | [AWS Terrain Tiles](https://registry.opendata.aws/terrain-tiles/) | `~/.cache/satprint/tiles` |
 | Imagery (GLB texture) | Esri World Imagery | `~/.cache/satprint/imagery` |
-| Buildings, bridges and water | [OpenFreeMap](https://openfreemap.org) vector tiles, zoom 14, rebuilt from OSM about weekly | `~/.cache/satprint/vtiles` |
+| Buildings, bridges, roads and water | [OpenFreeMap](https://openfreemap.org) vector tiles, zoom 14, rebuilt from OSM about weekly | `~/.cache/satprint/vtiles` |
 | Buildings, fallback; roof shapes | [Overpass API](https://wiki.openstreetmap.org/wiki/Overpass_API), 0.01° tiles | `~/.cache/satprint/osm` |
 | Buildings, optional | [Overture Maps](https://overturemaps.org) GeoParquet on S3, per release | `~/.cache/satprint/overture` |
 | Place search | [Nominatim](https://nominatim.org), one request per second | in memory |
@@ -85,6 +85,27 @@ built.
   join the buildings solids, in the STL, the GLB and the 3MF.
 - A deck between its piers is an overhang that may want slicer supports.
 
+### Roads
+
+Roads come from the same OpenFreeMap tiles, the `transportation` layer's road
+and path lines. Tunnels are left out, and so are rail, ferries and roads under
+construction.
+
+- Each line is a strip of its class width, the same widths as bridge decks,
+  never narrower than 0.8 mm in the model. At print scale a 7 m street is a
+  fraction of a nozzle wide, so most roads are drawn wider than they are.
+- With `auto` detail, a class is drawn once the model scale makes its streets
+  print a few strip widths apart: motorways, trunk and primary roads always,
+  secondary from about 0.003 mm per meter, tertiary from 0.008, minor streets
+  from 0.03 (a city a few kilometers across at 100 mm), and service roads,
+  tracks and paths from 0.1. `major` draws motorway to secondary, and `all`
+  draws every class.
+- The strips are joined, water and building footprints are cut out, and the
+  result is cut along the terrain mesh's triangles. The top is 0.4 mm above
+  the terrain and the floor 0.3 mm below it everywhere. Each connected road
+  network is one closed solid.
+- A road over water is cut at the water; turn on bridges to span it.
+
 ### Overpass
 
 Choose Overpass with "Building data" in the web app or
@@ -123,8 +144,8 @@ the imagery. Set `"texture": false` to skip it.
   helps.
 - Elevation and imagery downloads are capped at 64 tiles per request. Shrink
   the area or lower the resolution if you hit the cap.
-- Buildings and bridges are limited to areas up to 40 km², and very small
-  footprints are dropped.
+- Buildings, bridges and roads are limited to areas up to 40 km², and very
+  small footprints are dropped.
 - Bridges over water only. A bridge over a road, a railway or a valley is
   missing, and so is one whose water is not in the tiles' water layer.
 - The multi-color split works one grid cell at a time, so a river narrower than
@@ -138,6 +159,6 @@ the imagery. Set `"texture": false` to skip it.
 
 Terrain Tiles © Mapzen and AWS Open Data (SRTM, ASTER GDEM, GMTED2010, ETOPO1,
 NED, EU-DEM and others). Imagery © Esri, Maxar, Earthstar Geographics. Street
-map, buildings, bridges, water and search © OpenStreetMap contributors, under the ODbL.
+map, buildings, bridges, roads, water and search © OpenStreetMap contributors, under the ODbL.
 Overture buildings © Overture Maps Foundation and OpenStreetMap contributors,
 under the ODbL.

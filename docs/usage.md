@@ -24,6 +24,9 @@ After you change the code, restart `satprint serve` to pick up the change.
     - **Add buildings** for a city. City presets turn it on.
     - **Add bridges over water** for a bay or a river. They are limited to
       areas up to 40 km², like buildings, and work with or without them.
+    - **Add roads** to show the street network as raised strips. **Road
+      detail** picks which roads: by model scale, major roads only, or all
+      roads and paths. Same 40 km² limit.
     - **Multi-color 3MF** for a multi-material printer, and a **Border frame**
       width for a rim around the model.
     - **Drape satellite imagery** for the textured GLB. It is on by default.

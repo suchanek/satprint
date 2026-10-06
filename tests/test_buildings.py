@@ -151,6 +151,23 @@ def test_scale_and_minimum_height():
     assert rise(tiny) == pytest.approx(0.2, abs=1e-5)
 
 
+def test_a_lone_building_too_small_to_print_is_dropped():
+    relief, width, depth, mm_per_m = _block()
+    shed = way(_square(40.002, -73.998, 0.00004), building="yes")  # ~0.2 mm2
+    hut = way(_square(40.006, -73.994, 0.0001), building="yes")  # ~1.3 mm2
+    house = way(_square(40.00204, -73.998, 0.001), building="yes")  # shed's neighbor
+
+    def count(*ways, **kw):
+        found = buildings_from_osm({"elements": list(ways)})
+        return building_mesh(
+            found, BBOX, relief, width, depth, 3.0, mm_per_m, **kw
+        ).count
+
+    assert count(shed, hut) == 1  # the shed alone is a blob
+    assert count(shed, hut, house) == 3  # against the house it is kept
+    assert count(shed, hut, min_alone_mm2=0) == 2
+
+
 def test_buildings_are_clipped_to_the_block():
     straddling = way(_square(40.0095, -73.9905, 0.002), building="yes", height="20")
     outside = way(_square(40.05, -73.95), building="yes")

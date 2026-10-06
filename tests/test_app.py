@@ -167,6 +167,16 @@ def test_index_and_presets(client):
     assert client.get("/static/app.js").status_code == 200
 
 
+def test_page_asks_for_this_versions_script_and_styles(client):
+    from satprint import __version__
+
+    page = client.get("/").text
+    assert f'src="/static/app.js?v={__version__}"' in page
+    assert f'href="/static/style.css?v={__version__}"' in page
+    assert "__VERSION__" not in page
+    assert client.get(f"/static/app.js?v={__version__}").status_code == 200
+
+
 def test_page_is_revalidated_but_api_is_not(client):
     assert client.get("/").headers["cache-control"] == "no-cache"
     assert client.get("/static/app.js").headers["cache-control"] == "no-cache"

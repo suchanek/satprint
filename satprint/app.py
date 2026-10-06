@@ -13,7 +13,7 @@ from dataclasses import dataclass, field
 from typing import Literal
 
 from fastapi import FastAPI, File, HTTPException, Query, UploadFile
-from fastapi.responses import FileResponse, Response
+from fastapi.responses import HTMLResponse, Response
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 
@@ -760,7 +760,11 @@ def create_app(
 
     @app.get("/", include_in_schema=False)
     def index():
-        return FileResponse(os.path.join(STATIC_DIR, "index.html"))
+        # The script and stylesheet URLs carry the version, so after an
+        # upgrade the browser fetches them again instead of pairing the new
+        # page with an old cached copy.
+        with open(os.path.join(STATIC_DIR, "index.html"), encoding="utf-8") as fh:
+            return HTMLResponse(fh.read().replace("__VERSION__", __version__))
 
     app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
 

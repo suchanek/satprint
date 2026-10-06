@@ -59,6 +59,7 @@ Profile = tuple[tuple[float, float], ...]
 
 
 def _dome(n: int = 10) -> Profile:
+    """A hemispherical roof profile in ``n`` rings."""
     return tuple(
         (math.cos(t), math.sin(t))
         for t in (math.pi / 2 * i / n for i in range(1, n + 1))
@@ -86,6 +87,11 @@ ROOF_PROFILES: dict[str, Profile] = {
 
 @dataclass(frozen=True)
 class Building:
+    """A building or building part: footprint, height and roof shape.
+
+    A landmark can replace the prism with a custom ``solid``.
+    """
+
     footprint: Polygon  # lon/lat
     height_m: float
     is_part: bool = False
@@ -164,6 +170,7 @@ def parse_roof(
 
 
 def _ring(geometry: list[dict]) -> list[tuple[float, float]]:
+    """(lon, lat) points from an Overpass ``geom`` node list."""
     return [(p["lon"], p["lat"]) for p in geometry]
 
 
@@ -184,6 +191,7 @@ def _relation_polygon(rel: dict) -> Polygon | MultiPolygon | None:
 
 
 def _polygons(geom) -> list[Polygon]:
+    """The polygons in any shapely geometry, flattening collections."""
     if geom is None or geom.is_empty:
         return []
     if isinstance(geom, Polygon):
@@ -194,6 +202,7 @@ def _polygons(geom) -> list[Polygon]:
 
 
 def _lines(geom) -> list[LineString]:
+    """The line strings in any shapely geometry, flattening collections."""
     if geom is None or geom.is_empty:
         return []
     if isinstance(geom, LineString):
@@ -851,5 +860,6 @@ def resolve_overlaps(
 
 
 def bbox_area_km2(bbox: BBox) -> float:
+    """Ground area of ``bbox`` in square kilometers."""
     w, h = bbox.ground_size_m()
     return w * h / 1e6

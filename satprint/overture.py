@@ -48,6 +48,7 @@ _OSM_KIND = {"n": "node", "w": "way", "r": "relation"}
 
 
 def _client():
+    """The ``overturemaps.core`` module, or a RuntimeError naming the extra."""
     try:
         # overturemaps is the optional `overture` extra. Imported by name so
         # the type check passes with or without it installed.

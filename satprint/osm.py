@@ -124,6 +124,11 @@ class OverpassClient:
         urls: tuple[str, ...] = OVERPASS_URLS,
         timeout: float = 45.0,
     ):
+        """:param cache_dir: cache directory; default ``~/.cache/satprint/osm``.
+        :param session: HTTP session to use.
+        :param urls: Overpass servers, tried in order.
+        :param timeout: seconds per request.
+        """
         self.cache_dir = cache_dir or os.path.join(
             os.path.expanduser("~"), ".cache", "satprint", "osm"
         )
@@ -136,6 +141,7 @@ class OverpassClient:
         self._sleep = time.sleep
 
     def _post(self, url: str, query: str) -> dict:
+        """One query to one server; raises unless the answer has ``elements``."""
         resp = self.session.post(url, data={"data": query}, timeout=self.timeout)
         resp.raise_for_status()
         # An overloaded server answers 200 with an HTML error page.
@@ -150,6 +156,7 @@ class OverpassClient:
         return data
 
     def _cache_path(self, key: str) -> str:
+        """Cache file for the query cached under ``key``."""
         return os.path.join(self.cache_dir, f"{key}.json.gz")
 
     def _try_server(self, url: str, query: str, errors: list[str]) -> dict | None:
@@ -267,6 +274,11 @@ class VectorTileClient:
         tilejson_url: str = OPENFREEMAP_TILEJSON,
         timeout: float = 30.0,
     ):
+        """:param cache_dir: cache directory; default ``~/.cache/satprint/vtiles``.
+        :param session: HTTP session to use.
+        :param tilejson_url: TileJSON that names the current tile build.
+        :param timeout: seconds per request.
+        """
         self.cache_dir = cache_dir or os.path.join(
             os.path.expanduser("~"), ".cache", "satprint", "vtiles"
         )
@@ -289,6 +301,7 @@ class VectorTileClient:
             return self._template
 
     def fetch(self, z: int, x: int, y: int) -> bytes:
+        """The raw ``.pbf`` tile at z/x/y, from the cache or the server."""
         path = os.path.join(self.cache_dir, str(z), str(x), f"{y}.pbf")
         if os.path.exists(path):
             with open(path, "rb") as fh:
@@ -348,6 +361,11 @@ class Geocoder:
         timeout: float = 20.0,
         cache_size: int = 256,
     ):
+        """:param session: HTTP session to use.
+        :param url: Nominatim search endpoint.
+        :param timeout: seconds per request.
+        :param cache_size: most queries whose results are kept in memory.
+        """
         self.session = session or requests.Session()
         self.session.headers["User-Agent"] = USER_AGENT
         self.url = url
@@ -358,6 +376,7 @@ class Geocoder:
         self._cache_size = cache_size
 
     def _fetch(self, q: str, limit: int) -> list[dict]:
+        """One Nominatim request, spaced at least ``min_interval_s`` from the last."""
         with self._lock:
             wait = self.min_interval_s - (time.monotonic() - self._last)
             if wait > 0:

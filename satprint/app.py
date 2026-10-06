@@ -72,10 +72,14 @@ PRESETS = all_presets()
 
 
 class _LRU:
+    """A thread-safe dict that drops its least recently used entry past ``cap``."""
+
     def __init__(self, cap: int):
+        """:param cap: most entries kept."""
         self.cap, self._d, self._lock = cap, OrderedDict(), threading.Lock()
 
     def get(self, key):
+        """The value for ``key``, marked as recently used, or None."""
         with self._lock:
             if key in self._d:
                 self._d.move_to_end(key)
@@ -83,6 +87,7 @@ class _LRU:
             return None
 
     def put(self, key, value):
+        """Store ``value`` under ``key`` and evict past the cap."""
         with self._lock:
             self._d[key] = value
             self._d.move_to_end(key)
@@ -92,6 +97,8 @@ class _LRU:
 
 @dataclass
 class StoredModel:
+    """A built model's files and info, kept for download by model id."""
+
     stl: bytes
     png: bytes
     info: dict
@@ -115,6 +122,7 @@ class Job:
     status_code: int | None = None
 
     def as_dict(self) -> dict:
+        """The job as the JSON body of ``GET /api/jobs/{job_id}``."""
         return {
             "job_id": self.id,
             "status": self.status,
@@ -145,6 +153,8 @@ model_store = _LRU(32)  # model_id -> StoredModel
 
 
 class BBoxIn(BaseModel):
+    """A bounding box in degrees, as the API receives it."""
+
     south: float
     west: float
     north: float
@@ -152,6 +162,8 @@ class BBoxIn(BaseModel):
 
 
 class ModelRequest(BaseModel):
+    """Body of ``POST /api/model`` and ``POST /api/jobs``: what to build and how."""
+
     source: Literal["terrarium", "synthetic", "upload"] = "terrarium"
     bbox: BBoxIn | None = None
     upload_id: str | None = None
@@ -213,6 +225,8 @@ class ModelRequest(BaseModel):
 
 
 class ModelResponse(BaseModel):
+    """A built model: download URLs, build info and an inline preview."""
+
     model_id: str
     stl_url: str
     png_url: str
@@ -234,6 +248,16 @@ def create_app(
     geocoder: Geocoder | None = None,
     vector_tiles: VectorTileClient | None = None,
 ) -> FastAPI:
+    """Build the FastAPI app: the API routes and the static web page.
+
+    Each client defaults to a real one; tests pass fakes.
+
+    :param tile_fetcher: elevation tile source.
+    :param imagery_fetcher: satellite imagery tile source.
+    :param overpass: Overpass client for buildings, bridges and landmarks.
+    :param geocoder: place search for ``/api/search``.
+    :param vector_tiles: OpenFreeMap vector tiles for buildings, water and roads.
+    """
     app = FastAPI(
         title="satprint",
         version=__version__,
@@ -245,6 +269,7 @@ def create_app(
     vtiles = vector_tiles or VectorTileClient()
 
     def _water_for(bbox: BBox, progress: Progress | None = None) -> list:
+        """Water polygons in ``bbox``, cached."""
         key = _bbox_key(bbox)
         hit = water_cache.get(key)
         if hit is None:
@@ -280,6 +305,7 @@ def create_app(
     geo = geocoder or Geocoder()
 
     def _bbox_key(bbox: BBox) -> tuple:
+        """Cache key for ``bbox``, rounded to about a meter."""
         return tuple(
             round(v, 5) for v in (bbox.south, bbox.west, bbox.north, bbox.east)
         )
@@ -307,6 +333,7 @@ def create_app(
     def _texture_for(
         bbox: BBox, progress: Progress | None = None
     ) -> tuple[bytes, dict]:
+        """Satellite imagery of ``bbox`` as JPEG bytes and its metadata, cached."""
         key = _bbox_key(bbox)
         hit = imagery_cache.get(key)
         if hit is None:
@@ -318,6 +345,10 @@ def create_app(
         return hit
 
     def _terrain_for(req: ModelRequest, progress: Progress | None = None) -> Heightmap:
+        """The heightmap ``req`` asks for: synthetic, uploaded or downloaded.
+
+        :raises HTTPException: for a missing bbox or upload, or a failed download.
+        """
         if req.source == "synthetic":
             key = ("synthetic", req.seed, req.resolution)
             hm = terrain_cache.get(key)
@@ -388,10 +419,12 @@ def create_app(
 
     @app.get("/api/presets")
     def presets():
+        """Named example areas for the place picker."""
         return PRESETS
 
     @app.get("/api/search")
     def search(q: str = Query(..., min_length=2, max_length=200)):
+        """Places matching ``q``, from Nominatim."""
         try:
             return geo.search(q)
         except Exception as exc:
@@ -399,10 +432,12 @@ def create_app(
 
     @app.get("/api/health")
     def health():
+        """Liveness check with the running version."""
         return {"ok": True, "version": __version__}
 
     @app.post("/api/upload")
     async def upload(file: UploadFile = File(...)):
+        """Store an uploaded heightmap file for ``source=upload``; 60 MB at most."""
         data = await file.read()
         if len(data) > 60 * 1024 * 1024:
             raise HTTPException(413, "file too large (60 MB limit)")
@@ -697,6 +732,7 @@ def create_app(
 
     @app.post("/api/model", response_model=ModelResponse)
     def make_model(req: ModelRequest):
+        """Build a model and wait for it."""
         return _build(req)
 
     @app.post("/api/jobs")
@@ -706,9 +742,11 @@ def create_app(
         jobs.put(job.id, job)
 
         def report(stage: str, done: int, total: int) -> None:
+            """Record build progress on the job."""
             job.stage, job.done, job.total = stage, done, total
 
         def run() -> None:
+            """Build the model and record the result or the error on the job."""
             try:
                 job.result = _build(req, report).model_dump()
                 job.status = "done"
@@ -724,6 +762,7 @@ def create_app(
 
     @app.get("/api/jobs/{job_id}")
     def job_status(job_id: str):
+        """Progress, and the result once done, of a background build."""
         job = jobs.get(job_id)
         if job is None:
             raise HTTPException(404, "job not found (server restarted?)")
@@ -731,6 +770,7 @@ def create_app(
 
     @app.get("/api/model/{model_id}/{filename}")
     def download(model_id: str, filename: str):
+        """One file of a built model: PNG, STL, GLB, 3MF or ``info.json``."""
         m = model_store.get(model_id)
         if m is None:
             raise HTTPException(404, "model not found — generate it again")
@@ -760,6 +800,7 @@ def create_app(
 
     @app.get("/", include_in_schema=False)
     def index():
+        """The web page."""
         # The script and stylesheet URLs carry the version, so after an
         # upgrade the browser fetches them again instead of pairing the new
         # page with an old cached copy.

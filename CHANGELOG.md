@@ -14,6 +14,17 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   upgrade. Before, a browser could pair the new page with a script it had
   cached from the old version: the Roads checkbox showed, but the old script
   never sent it, and the model came back without roads.
+- **A short bridge with no bank no longer floats.** A bridge piece that
+  reaches no bank, such as a gangway out to a moored boat, now always stands
+  on at least one pier in the water, even with piers turned off. Before, one
+  shorter than the pier spacing had no pier, and its deck hung above the
+  water with nothing under it, so a slicer warned of floating regions (seen
+  on the Seine in the Eiffel Tower preset).
+- **A lone building too small to print is left out.** A building under
+  0.4 mm2 on the model that touches no other building printed as a blob, not
+  a building; it is now dropped (`MIN_ALONE_MM2`, the `min_alone_mm2`
+  parameter of `building_mesh`). A small building against a neighbor is
+  kept, so blocks and buildings made of parts keep their shape.
 
 ## [0.4.0] - 2026-10-06
 

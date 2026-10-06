@@ -49,6 +49,8 @@ from .terrain import BBox, Progress
 
 LEVEL_HEIGHT_M = 3.0
 DEFAULT_HEIGHT_M = 8.0
+# A lone footprint smaller than this prints as a blob, not a building.
+MIN_ALONE_MM2 = 0.4
 MAX_BUILDING_AREA_KM2 = 40.0  # Overpass responses grow fast with area
 
 _FEET = re.compile(r"^\s*([\d.]+)\s*(ft|')\s*$")
@@ -538,6 +540,7 @@ def building_mesh(
     sink_mm: float = 0.3,
     min_height_mm: float = 0.2,
     min_area_mm2: float = 0.05,
+    min_alone_mm2: float = MIN_ALONE_MM2,
     simplify_mm: float = 0.05,
     min_roof_mm: float = 0.3,
     min_feature_mm: float = 0.6,
@@ -557,6 +560,8 @@ def building_mesh(
     :param sink_mm: how far floors go below the terrain.
     :param min_height_mm: lowest building height, so small ones still print.
     :param min_area_mm2: footprints smaller than this are dropped.
+    :param min_alone_mm2: a building smaller than this that touches no other
+        is dropped, too small for a nozzle to draw.
     :param simplify_mm: footprint simplification tolerance.
     :param min_roof_mm: shaped roofs lower than this are printed flat, at the
         building's full height.
@@ -577,12 +582,18 @@ def building_mesh(
     footprints: list[tuple[Polygon, float]] = []
     shaped: list[tuple[Polygon, float, Profile, float]] = []
     meshes = [b.solid for b in buildings if b.solid is not None]
-    for n_done, b in enumerate(buildings):
+    models = [shapely.transform(b.footprint, to_model) for b in buildings]
+    near = STRtree(models)
+    for n_done, (b, model) in enumerate(zip(buildings, models, strict=True)):
         if progress and n_done % 500 == 0:
             progress("building mesh", n_done, len(buildings))
         if b.solid is not None:
             continue  # placed below, outside the footprint pipeline
-        model = shapely.transform(b.footprint, to_model)
+        if (
+            model.area < min_alone_mm2
+            and len(near.query(model, predicate="dwithin", distance=simplify_mm)) == 1
+        ):
+            continue
         clipped = shapely.make_valid(model.intersection(frame))
         h_mm = max(b.height_m * mm_per_m * scale, min_height_mm)
         pieces = [

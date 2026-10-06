@@ -221,12 +221,25 @@ def test_islands_and_missing_banks():
     bm = make([island], relief, pier_spacing_mm=0)
     assert bm.count == 1 and len(solids(bm)) == 3
     assert check_watertight(bm.as_mesh())["watertight"]
-    # water to both edges of the block: no landing, the deck is level
+    # water to both edges of the block: no landing, the deck is level and,
+    # with nothing else under it, stands on a pier even with piers off
     sea = encode(water=[box(0, 0, 4096, 4096)], lines=[(ROAD, "primary")])
     bm = make([sea], np.full((41, 41), 1.0), pier_spacing_mm=0)
-    assert bm.count == 1 and len(solids(bm)) == 1
+    assert bm.count == 1 and len(solids(bm)) == 3
     top = bm.vertices[np.unique(bm.roof_faces)][:, 2]
     assert top == pytest.approx(1.0 + 3.0 + 1.0, abs=1e-4)  # water + clearance
+    assert bm.vertices[:, 2].min() < 1.0 + 3.0
+
+
+def test_a_short_bridge_with_no_bank_does_not_float():
+    # a gangway out to a moored boat: a few meters of path, water at both ends
+    gangway = LineString([(2040, 2048), (2056, 2048)])
+    tile = encode(water=[RIVER], lines=[(gangway, "path")])
+    bm = make([tile])
+    assert bm.count == 1
+    assert check_watertight(bm.as_mesh())["watertight"]
+    v = bm.vertices
+    assert v[:, 2].min() < 1.0 + 3.0  # reaches into the water
 
 
 def test_a_line_split_across_two_tiles_is_one_bridge():

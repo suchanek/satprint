@@ -162,7 +162,7 @@ def bridge_mesh(
     slabs between them, open underneath. Land between stretches of water,
     such as a tower's island, is part of the span, not a landing. With one
     bank the deck is flat there, with none it is at the water plus the
-    clearance.
+    clearance and stands on at least one pier, whatever ``pier_spacing_mm``.
 
     :param outlines: bridge outline polygons in lon/lat.
     :param lines: (bridge line in lon/lat, OpenMapTiles class) pairs.
@@ -267,6 +267,8 @@ def bridge_mesh(
             t = shapely.get_coordinates(span) @ u
             t0, t1 = float(t.min()), float(t.max())
             n = math.ceil((t1 - t0) / pier_spacing_mm) if pier_spacing_mm > 0 else 1
+            if not lands:
+                n = max(n, 2)  # no bank to rest on: a pier or it floats
             cells, start = [], t0 - 1.0
             for k in range(1, n):
                 c = t0 + (t1 - t0) * k / n

@@ -37,3 +37,4 @@ build/
 # === end KG generated artifacts ===
 site/
 renders/
+.vscode/

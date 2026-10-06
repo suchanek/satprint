@@ -507,6 +507,7 @@ def create_app(
                     if bmesh.count:
                         top = float(bmesh.vertices[:, 2].max())
                         info["height_mm"] = max(info["height_mm"], top)
+        brmesh: BuildingMesh | None = None
         if req.bridges and hm.bbox is not None:
             area = bbox_area_km2(hm.bbox)
             # A bridge failure should not cost the STL either.
@@ -569,6 +570,7 @@ def create_app(
                         params.base_mm,
                         info["mm_per_m_plan"],
                         detail=req.road_detail,
+                        bridges=brmesh,
                     )
                     building_info["roads"] = rmesh.count
                     if rmesh.count:

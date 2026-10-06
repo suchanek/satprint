@@ -150,6 +150,7 @@ def _build(args) -> int:
             info["height_mm"] = max(
                 info["height_mm"], float(bmesh.vertices[:, 2].max())
             )
+    brmesh = None
     if args.bridges:
         assert hm.bbox is not None
         print("fetching bridges ...", file=sys.stderr)
@@ -187,6 +188,7 @@ def _build(args) -> int:
             params.base_mm,
             info["mm_per_m_plan"],
             detail=args.road_detail,
+            bridges=brmesh,
         )
         info["roads"] = rmesh.count
         if rmesh.count:

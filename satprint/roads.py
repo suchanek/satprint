@@ -7,8 +7,8 @@ printable ``min_width_mm``. At print scale a street is a fraction of a nozzle
 wide, so most roads are drawn wider than they are, and minor classes are left
 out of large areas, where they would cover the land (:data:`ROAD_MIN_SCALE`).
 
-The strips are joined into one footprint, with water and building footprints
-cut out, and the footprint is cut along the triangles of a lattice of the
+The strips are joined into one footprint, with water, building footprints
+and bridges cut out, and the footprint is cut along the triangles of a lattice of the
 terrain grid's nodes (:func:`_lattice`), every node on a coarse grid. Each
 piece lies on one flat lattice triangle, so its top sits a fixed height above
 the lattice surface; that height is ``height_mm`` plus however far the terrain
@@ -99,6 +99,7 @@ def road_mesh(
     min_area_mm2: float = 0.2,
     lattice_mm: float = 0.6,
     lattice_tol_mm: float = 0.3,
+    bridges: BuildingMesh | None = None,
 ) -> BuildingMesh:
     """Roads as a thin solid on the terrain block built from ``relief_mm``.
 
@@ -122,6 +123,9 @@ def road_mesh(
     :param lattice_tol_mm: the lattice is made finer until the terrain under
         the roads strays no more than this from it. Roads are raised and
         sunk by what strays, so they never sink into the terrain or float.
+    :param bridges: bridge solids from :func:`satprint.bridges.bridge_mesh`;
+        roads stop at their outline, so a road meets a bridge's landing
+        instead of running over it.
     :return: the roads as one :class:`BuildingMesh`, the tops as roofs;
         ``count`` is the number of connected road networks.
     """
@@ -150,6 +154,10 @@ def road_mesh(
     )
     footprint = shapely.union_all(strips).intersection(frame)
     cut = [shapely.transform(p, to_model) for p in [*water, *footprints]]
+    if bridges is not None and bridges.count:
+        # The bridges' outline in plan: their tops, seen from above.
+        tris = shapely.polygons(bridges.vertices[bridges.roof_faces][:, :, :2])
+        cut.append(shapely.union_all(tris[shapely.area(tris) > 0]))
     if cut:
         footprint = footprint.difference(shapely.union_all(cut))
     footprint = shapely.make_valid(footprint.simplify(simplify_mm))

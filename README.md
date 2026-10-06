@@ -248,8 +248,8 @@ curl -s localhost:7417/api/model -H 'content-type: application/json' -d '{
   are no towers or cables. Areas are limited to 40 km², as with buildings.
 - **Roads.** Roads are raised 0.4 mm strips, at least 0.8 mm wide, so most
   are drawn wider than they are. Minor classes are left out of large areas,
-  where they would cover the land. Roads stop at water and at buildings;
-  tunnels, rail and ferries are left out. Areas are limited to 40 km², as
+  where they would cover the land. Roads stop at water, buildings and
+  bridges; tunnels, rail and ferries are left out. Areas are limited to 40 km², as
   with buildings. On rough ground at a fine grid, roads stand up to 0.3 mm
   taller so they clear the terrain everywhere.
 - **Roof shapes.** Roofs tagged `roof:shape` dome, onion, cone or pyramidal

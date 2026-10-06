@@ -206,3 +206,24 @@ def test_rough_fine_grids_fall_back_to_every_cell():
     exact = build(road, relief=relief, lattice_mm=0.0)
     assert m.roof_faces.shape == exact.roof_faces.shape
     assert check_watertight(m.as_mesh())["watertight"]
+
+
+def test_roads_meet_bridges_at_their_landings():
+    import shapely
+
+    from tests.test_bridges import LINE_TILE, RIVER, make, relief_with_channel
+
+    relief = relief_with_channel()
+    bridge = make([LINE_TILE], relief=relief)
+    assert bridge.count == 1
+    road = [(LineString([(0, 2048), (4096, 2048)]), "primary")]
+    alone = build(road, water=[RIVER], relief=relief)
+    met = build(road, water=[RIVER], relief=relief, bridges=bridge)
+    assert check_watertight(met.as_mesh())["watertight"]
+    outline = shapely.union_all(
+        shapely.polygons(bridge.vertices[bridge.roof_faces][:, :, :2].astype(float))
+    ).buffer(-0.01)
+    tops = shapely.points(met.vertices[: met.vertices.shape[0] // 2, :2])
+    assert not shapely.contains(outline, tops).any()
+    alone_tops = shapely.points(alone.vertices[: alone.vertices.shape[0] // 2, :2])
+    assert shapely.contains(outline, alone_tops).any()  # it did run onto them

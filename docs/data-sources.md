@@ -100,15 +100,17 @@ construction.
   from 0.03 (a city a few kilometers across at 100 mm), and service roads,
   tracks and paths from 0.1. `major` draws motorway to secondary, and `all`
   draws every class.
-- The strips are joined, water and building footprints are cut out, and the
-  result is cut along the terrain mesh's triangles, or, on a fine grid, along
-  a lattice of every few grid nodes about 0.6 mm apart, so roads do not add
-  as many triangles as the terrain. Between lattice nodes the terrain strays
-  from the lattice; the lattice is made finer until it strays no more than
-  0.3 mm under the roads, and the roads are raised and sunk by that much.
-  The top is at least 0.4 mm above the terrain and the floor at least 0.3 mm
-  below it everywhere. Each connected road network is one closed solid.
-- A road over water is cut at the water; turn on bridges to span it.
+- The strips are joined, water, building footprints and bridges are cut out,
+  and the result is cut along the terrain mesh's triangles, or, on a fine
+  grid, along a lattice of every few grid nodes about 0.6 mm apart, so roads
+  do not add as many triangles as the terrain. Between lattice nodes the
+  terrain strays from the lattice; the lattice is made finer until it strays
+  no more than 0.3 mm under the roads, and the roads are raised and sunk by
+  that much. The top is at least 0.4 mm above the terrain and the floor at
+  least 0.3 mm below it everywhere. Each connected road network is one closed
+  solid.
+- A road over water is cut at the water; turn on bridges to span it. With
+  bridges on, a road stops where it meets a bridge's landing.
 
 ### Overpass
 

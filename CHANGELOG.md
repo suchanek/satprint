@@ -17,8 +17,9 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   triangles about 0.6 mm apart, finer where the terrain is rough, and raised
   by however far the terrain strays from that lattice, so they follow the
   ground without sinking into it or floating. Each connected road network is
-  one closed solid. Water and building footprints are cut out of them; tunnels, rail and
-  ferries are left out. `road_detail` is `auto` (classes chosen by model
+  one closed solid. Water, building footprints and bridges are cut out of
+  them, so a road stops at a bridge's landing; tunnels, rail and ferries are
+  left out. `road_detail` is `auto` (classes chosen by model
   scale: major roads for a region, minor streets for a city, service roads
   and paths under about 1 km across), `major` (motorway to secondary) or
   `all`. Roads are in the STL and GLB and are their own `roads` part in the

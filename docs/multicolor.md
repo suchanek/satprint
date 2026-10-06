@@ -18,8 +18,8 @@ without a frame.
 
 ## Make one
 
-In the web app, check **Multi-color 3MF**, and set a **Border frame** width if
-you want the fourth part. Generate, then click **Download multi-color 3MF**.
+In the web app, check **Multi-color 3MF**, check **Add roads** if you want the
+roads part, and set a **Border frame** width if you want the border part. Generate, then click **Download multi-color 3MF**.
 
 From the command line:
 
@@ -30,8 +30,8 @@ satprint build --bbox 45.43 12.32 45.446 12.343 --buildings --frame 5 \
 
 ## Print it on a Bambu printer
 
-1. In Bambu Studio, set up four filaments in the left sidebar, or sync them
-   from the AMS.
+1. In Bambu Studio, set up one filament per part, up to five, in the left
+   sidebar, or sync them from the AMS.
 2. Open the 3MF. Bambu Studio reports that it loads "geometry only", as it does
    for any 3MF it did not write. The part names and filaments still come
    through.

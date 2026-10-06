@@ -1,22 +1,20 @@
-# Release Notes -- v0.3.0
+# Release Notes -- v0.4.0
 
-> Released: 2026-10-05
+> Released: 2026-10-06
 
-satprint 0.3.0 fixes two things that were visibly wrong in city prints: famous landmarks that came out as solid blobs, and bridges that were missing altogether. It also stops lakes from printing as raised plateaus, and gives the web page a light theme.
+satprint 0.4.0 adds roads. Until now a city print showed buildings standing on bare ground, and the street grid could only be read from the gaps between them. Roads now print as their own raised strips that follow the terrain, in the STL, the GLB and the multi-color 3MF, where they get a filament of their own.
 
 ## What changed
 
-**Landmarks are real shapes.** OpenStreetMap maps the Gateway Arch, the Eiffel Tower and the Space Needle as stacks of parts, and satprint extruded every part from the ground, so they printed as walls and columns. They are now built as meshes from published dimensions and placed in the model in place of the buildings underneath: an open Arch, an Eiffel Tower on four legs with archways, a Space Needle with its saucer. Christ the Redeemer in Rio is included too. At city scale its arms would be thinner than a printer can make, so the statue is enlarged in proportion, the way a symbol on a map is. Presets for St. Louis, Seattle and Rio are included.
+**Roads.** `--roads`, `roads: true` in the API and a Roads checkbox in the web app draw the OpenStreetMap road network from the same tiles as the buildings. A real street is a fraction of a nozzle wide at print scale, so every road is drawn at least 0.8 mm wide and 0.4 mm high. Which roads are drawn depends on the model's scale: a region shows its motorways and main roads, a city adds its minor streets, and an area under about a kilometer across adds service roads and paths. `--road-detail` and the Road detail selector can instead ask for major roads only or for everything. Roads stop at water, at buildings and at bridge landings, and tunnels, rail and ferries are left out. Each connected road network is one closed solid that stays watertight with the terrain, buildings and bridges around it.
 
-**Bridges over water.** `--bridges`, `bridges: true` in the API and a checkbox in the web app add a deck across any bridge that crosses water, on evenly spaced piers with a short landing on each bank. OpenStreetMap has no deck heights, so the height is estimated from the banks, and the piers are not the real ones. There are no towers or cables. Bridges are part of the buildings solids, so they appear in the STL, the GLB and the 3MF.
+**Roads follow hills.** Each strip is cut along the terrain mesh, so it climbs and descends with the ground instead of cutting into a hillside or floating over a valley. On fine grids the strips are cut on a coarser lattice to keep the triangle count down, and they are raised by however far the terrain strays from that lattice, so they still clear the ground everywhere. On a 1024-column model of San Francisco this cut the roads from 2.1 million triangles to 373 thousand, and the whole build from 73 seconds to 35.
 
-**Lakes print flat.** Elevation data over water is noisy. A lake in a steep valley, such as the Lagoa in Rio, could read tens of meters above its shore and printed as a raised plateau with a cliff around it. Each lake, pond, reservoir and sea surface is now set to the lower shore of its own outline. Rivers are left alone.
-
-**Web app.** The page has a light and a dark theme, following your system on the first visit. The header shows the version and links to the documentation. The preset list is labeled and sits above the search box, the app opens on the Gateway Arch, and dragging the map slides it under the selection rectangle so the area can be moved without redrawing it. Scroll and pinch zoom in the 3D preview now follow the gesture, which fixes a slow, many-pinch zoom on Retina Macs and in Safari. The documentation images were retaken.
+**The web page reloads cleanly.** The page and its files are now served so that the browser checks for a newer copy on every load. After an upgrade, a plain reload shows the new version instead of a cached old one.
 
 ## Upgrading
 
-Nothing to do. Models of the same area can differ from 0.2.x: landmarks and bridges change the buildings, and lakes are lower. Bridges are off by default in the API and CLI, and the web app turns them on for city presets.
+Nothing to do. Roads are off by default in the API, the CLI and the web app, so existing builds are unchanged. A browser that cached the 0.3.0 page needs one hard reload to pick up the Roads controls; after that, plain reloads are enough. The multi-color 3MF can now have five parts: a model with roads puts them on filament 4 and the border on filament 5.
 
 ---
 

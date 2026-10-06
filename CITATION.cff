@@ -5,18 +5,19 @@ title: "satprint: Satellite Terrain to 3D-Printable Models"
 abstract: >
   satprint turns satellite elevation data into watertight, 3D-printable
   terrain models scaled to the printer, with a solid base. Cities can carry
-  their OpenStreetMap buildings as closed solids, and a multi-color 3MF splits
-  the model into land, water, buildings and a border frame for multi-material
-  printers. A textured GLB drapes satellite imagery over the terrain for
-  viewing. It runs as a web app, a command-line tool and a REST API.
+  their OpenStreetMap buildings and bridges as closed solids and their roads
+  as raised strips, and a multi-color 3MF splits the model into land, water,
+  buildings, roads and a border frame for multi-material printers. A
+  textured GLB drapes satellite imagery over the terrain for viewing. It
+  runs as a web app, a command-line tool and a REST API.
 authors:
   - family-names: Suchanek
     given-names: "Eric G., PhD"
     orcid: "https://orcid.org/0009-0009-0891-1507"
     email: suchanek@flux-frontiers.com
     affiliation: "Flux-Frontiers"
-version: "0.3.0"
-date-released: "2026-10-05"
+version: "0.4.0"
+date-released: "2026-10-06"
 # The Zenodo concept DOI, which resolves to the newest archived release.
 doi: "10.5281/zenodo.23094151"
 license: MIT

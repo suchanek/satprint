@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/brand/satprint-logo-dark.svg">
-    <img src="https://raw.githubusercontent.com/suchanek/satprint/v0.3.0/docs/brand/satprint-logo.svg" alt="satprint" width="460">
+    <img src="https://raw.githubusercontent.com/suchanek/satprint/v0.4.0/docs/brand/satprint-logo.svg" alt="satprint" width="460">
   </picture>
 </p>
 
@@ -10,7 +10,7 @@
 [![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue.svg)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/suchanek/satprint/blob/main/LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/satprint.svg)](https://pypi.org/project/satprint/)
-[![Version](https://img.shields.io/badge/version-0.3.0-blue.svg)](https://github.com/suchanek/satprint/releases)
+[![Version](https://img.shields.io/badge/version-0.4.0-blue.svg)](https://github.com/suchanek/satprint/releases)
 [![Poetry](https://img.shields.io/endpoint?url=https://python-poetry.org/badge/v0.json)](https://python-poetry.org/)
 [![DOI](https://img.shields.io/badge/DOI-10.5281%2Fzenodo.23094151-blue.svg)](https://doi.org/10.5281/zenodo.23094151)
 [![pre-commit](https://img.shields.io/badge/pre--commit-enabled-brightgreen?logo=pre-commit)](https://pre-commit.com/)
@@ -34,12 +34,12 @@ AWS Terrain Tiles        clamp sea, smooth,           terrain + walls + base
                                                       + land/water/border 3MF
 ```
 
-![satprint web UI](https://raw.githubusercontent.com/suchanek/satprint/v0.3.0/docs/screenshot.png)
+![satprint web UI](https://raw.githubusercontent.com/suchanek/satprint/v0.4.0/docs/screenshot.png)
 
 Mount Fuji from real elevation tiles, 120 mm wide with a 5 mm frame, 1.5x
 exaggeration:
 
-![Mount Fuji preview](https://raw.githubusercontent.com/suchanek/satprint/v0.3.0/docs/fuji-preview.png)
+![Mount Fuji preview](https://raw.githubusercontent.com/suchanek/satprint/v0.4.0/docs/fuji-preview.png)
 
 ## Features
 
@@ -124,19 +124,23 @@ After you change the code, restart `satprint serve` to pick up the change.
 
 ## Print in several colors
 
-The multi-color 3MF holds up to four parts, in this filament order:
+The multi-color 3MF holds up to five parts, in this filament order:
 
 | Filament | Part | Display color |
 |---|---|---|
 | 1 | `land` | green |
 | 2 | `water` | blue |
 | 3 | `buildings` | white |
-| 4 | `border` | dark gray |
+| 4 | `roads` | dark gray |
+| 5 | `border` | dark gray |
+
+Bridges share the `buildings` part. Parts without geometry are left out, and
+the parts after them move up a filament.
 
 To print it on a Bambu printer with an AMS:
 
-1. In Bambu Studio, set up four filaments in the left sidebar, or sync them
-   from the AMS.
+1. In Bambu Studio, set up one filament per part, up to five, in the left
+   sidebar, or sync them from the AMS.
 2. Open the 3MF. Bambu Studio reports that it loads "geometry only", as it does
    for any 3MF it did not write; the part names and filaments still come
    through.
@@ -354,13 +358,13 @@ contributors, under the ODbL.
 
 If you use satprint in your research or project, please cite it:
 
-> Suchanek, E. G. (2026). *satprint: Satellite Terrain to 3D-Printable Models* (Version 0.3.0) [Software]. Flux-Frontiers. https://doi.org/10.5281/zenodo.23094151
+> Suchanek, E. G. (2026). *satprint: Satellite Terrain to 3D-Printable Models* (Version 0.4.0) [Software]. Flux-Frontiers. https://doi.org/10.5281/zenodo.23094151
 
 ```bibtex
 @software{suchanek_satprint,
   author    = {Suchanek, Eric G.},
   title     = {{satprint}: Satellite Terrain to 3D-Printable Models},
-  version   = {0.3.0},
+  version   = {0.4.0},
   year      = {2026},
   publisher = {Flux-Frontiers},
   url       = {https://github.com/suchanek/satprint},

@@ -42,7 +42,7 @@ packages = [{ include = "satprint" }]
 # ---------------------------------------------------------------------------
 [project]
 name = "satprint"
-version = "0.4.0"
+version = "0.4.1"
 description = "Satellite terrain to 3D-printable models: watertight STL, multi-color 3MF and textured GLB, with OpenStreetMap buildings"
 readme = "README.md"
 license = "MIT"

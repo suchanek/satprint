@@ -6,6 +6,8 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.4.1] - 2026-10-06
+
 ### Fixed
 
 - **A new version's controls work on the first load after an upgrade.** The

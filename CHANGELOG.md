@@ -6,6 +6,15 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Fixed
+
+- **A new version's controls work on the first load after an upgrade.** The
+  page asks for its script and stylesheet with the version in the URL
+  (`/static/app.js?v=0.4.1`, say), so a browser fetches them again after an
+  upgrade. Before, a browser could pair the new page with a script it had
+  cached from the old version: the Roads checkbox showed, but the old script
+  never sent it, and the model came back without roads.
+
 ## [0.4.0] - 2026-10-06
 
 ### Added

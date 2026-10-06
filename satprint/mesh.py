@@ -26,14 +26,18 @@ import numpy as np
 
 @dataclass(frozen=True)
 class Mesh:
+    """A triangle mesh in millimeters, x east, y north, z up."""
+
     vertices: np.ndarray  # (n, 3) float32
     faces: np.ndarray  # (m, 3) int64, counter-clockwise seen from outside
 
     @property
     def triangle_count(self) -> int:
+        """Number of triangles."""
         return int(self.faces.shape[0])
 
     def bounds(self) -> tuple[np.ndarray, np.ndarray]:
+        """(min corner, max corner) of the vertices."""
         return self.vertices.min(axis=0), self.vertices.max(axis=0)
 
     def volume_mm3(self) -> float:
@@ -43,6 +47,7 @@ class Mesh:
         return float(np.einsum("ij,ij->i", a, np.cross(b, c)).sum() / 6.0)
 
     def surface_area_mm2(self) -> float:
+        """Total triangle area."""
         v = self.vertices[self.faces].astype(np.float64)
         n = np.cross(v[:, 1] - v[:, 0], v[:, 2] - v[:, 0])
         return float(0.5 * np.linalg.norm(n, axis=1).sum())
@@ -59,6 +64,7 @@ class BuildingMesh:
 
     @classmethod
     def empty(cls) -> BuildingMesh:
+        """A mesh with no solids."""
         return cls(
             np.zeros((0, 3), np.float32),
             np.zeros((0, 3), np.int64),
@@ -67,6 +73,7 @@ class BuildingMesh:
         )
 
     def as_mesh(self) -> Mesh:
+        """Roofs and walls as one :class:`Mesh`."""
         return Mesh(self.vertices, np.vstack([self.roof_faces, self.wall_faces]))
 
 

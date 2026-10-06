@@ -59,6 +59,7 @@ from .water import level_water, multicolor_parts, water_from_vector_tiles, water
 
 
 def _build(args) -> int:
+    """Run ``satprint build``: make the model and write its files."""
     if args.synthetic:
         hm = synthetic_heightmap(
             rows=int(args.resolution * 0.75), cols=args.resolution, seed=args.seed
@@ -267,6 +268,7 @@ def _build(args) -> int:
 
 
 def _serve(args) -> int:
+    """Run ``satprint serve``: the web app under uvicorn."""
     import uvicorn
 
     uvicorn.run("satprint.app:app", host=args.host, port=args.port, reload=args.reload)
@@ -274,6 +276,11 @@ def _serve(args) -> int:
 
 
 def main(argv=None) -> int:
+    """Parse ``argv`` and run the chosen subcommand.
+
+    :param argv: arguments without the program name; None reads ``sys.argv``.
+    :return: the process exit code.
+    """
     p = argparse.ArgumentParser(
         prog="satprint",
         description=__doc__,

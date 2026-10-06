@@ -74,6 +74,7 @@ def bridges_from_vector_tiles(
 
 
 def _smoothstep(t: np.ndarray) -> np.ndarray:
+    """Cubic ease from 0 to 1 over ``t`` in [0, 1], flat at both ends."""
     t = np.clip(t, 0.0, 1.0)
     return t * t * (3.0 - 2.0 * t)
 

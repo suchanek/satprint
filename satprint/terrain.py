@@ -47,6 +47,8 @@ Progress = Callable[[str, int, int], None]
 
 @dataclass(frozen=True)
 class BBox:
+    """A latitude/longitude box in degrees, within +/-85 degrees latitude."""
+
     south: float
     west: float
     north: float
@@ -62,10 +64,12 @@ class BBox:
 
     @property
     def mid_lat(self) -> float:
+        """Latitude halfway between south and north."""
         return (self.south + self.north) / 2
 
     @property
     def mid_lon(self) -> float:
+        """Longitude halfway between west and east."""
         return (self.west + self.east) / 2
 
     def ground_size_m(self) -> tuple[float, float]:
@@ -77,6 +81,8 @@ class BBox:
 
 @dataclass
 class Heightmap:
+    """An elevation grid in meters and the ground size it covers."""
+
     data: np.ndarray  # (rows, cols) float32 meters; row 0 = north
     ground_width_m: float
     ground_height_m: float
@@ -86,14 +92,17 @@ class Heightmap:
 
     @property
     def shape(self) -> tuple[int, int]:
+        """(rows, cols) of the grid."""
         return self.data.shape
 
     @property
     def min(self) -> float:
+        """Lowest elevation, ignoring NaN."""
         return float(np.nanmin(self.data))
 
     @property
     def max(self) -> float:
+        """Highest elevation, ignoring NaN."""
         return float(np.nanmax(self.data))
 
 
@@ -103,6 +112,7 @@ class Heightmap:
 
 
 def haversine_m(lat1, lon1, lat2, lon2) -> float:
+    """Great-circle distance in meters between two points in degrees."""
     p1, p2 = math.radians(lat1), math.radians(lat2)
     dphi = p2 - p1
     dlmb = math.radians(lon2 - lon1)
@@ -139,6 +149,7 @@ def _tile_range(bbox: BBox, zoom: int) -> tuple[int, int, int, int]:
 
 
 def _tile_count(bbox: BBox, zoom: int) -> int:
+    """Number of tiles covering ``bbox`` at ``zoom``."""
     tx0, ty0, tx1, ty1 = _tile_range(bbox, zoom)
     return (tx1 - tx0 + 1) * (ty1 - ty0 + 1)
 
@@ -230,6 +241,11 @@ class TileFetcher:
         url_template: str = TERRARIUM_URL,
         timeout: float = 30.0,
     ):
+        """:param cache_dir: cache directory; default ``~/.cache/satprint/tiles``.
+        :param session: HTTP session to use.
+        :param url_template: tile URL with ``{z}``, ``{x}`` and ``{y}``.
+        :param timeout: seconds per request.
+        """
         self.cache_dir = cache_dir or os.path.join(
             os.path.expanduser("~"), ".cache", "satprint", "tiles"
         )
@@ -241,9 +257,14 @@ class TileFetcher:
         self.timeout = timeout
 
     def _cache_path(self, z, x, y) -> str:
+        """Cache file for tile z/x/y."""
         return os.path.join(self.cache_dir, str(z), str(x), f"{y}.{self.ext}")
 
     def fetch_bytes(self, z: int, x: int, y: int) -> bytes:
+        """The encoded tile at z/x/y, from the cache or the server.
+
+        :raises LookupError: when the server has no such tile.
+        """
         path = self._cache_path(z, x, y)
         if os.path.exists(path):
             with open(path, "rb") as fh:
@@ -261,6 +282,7 @@ class TileFetcher:
         return resp.content
 
     def fetch(self, z: int, x: int, y: int) -> np.ndarray:
+        """Tile z/x/y as elevations in meters."""
         return decode_terrarium(self.fetch_bytes(z, x, y))
 
 
@@ -276,6 +298,7 @@ class ImageryFetcher(TileFetcher):
         url_template: str = IMAGERY_URL,
         timeout: float = 30.0,
     ):
+        """As :class:`TileFetcher`, caching in ``~/.cache/satprint/imagery``."""
         super().__init__(
             cache_dir
             or os.path.join(os.path.expanduser("~"), ".cache", "satprint", "imagery"),
@@ -285,6 +308,7 @@ class ImageryFetcher(TileFetcher):
         )
 
     def fetch(self, z: int, x: int, y: int) -> np.ndarray:
+        """Tile z/x/y as RGB pixels."""
         img = Image.open(io.BytesIO(self.fetch_bytes(z, x, y))).convert("RGB")
         return np.asarray(img, dtype=np.uint8)
 
@@ -468,6 +492,7 @@ def load_heightmap_file(
 
 
 def resample(arr: np.ndarray, rows: int, cols: int) -> np.ndarray:
+    """Resize a float grid to ``rows`` x ``cols``: box filter down, bicubic up."""
     img = Image.fromarray(np.ascontiguousarray(arr, dtype=np.float32), "F")
     method = (
         Image.Resampling.BOX
@@ -492,6 +517,8 @@ def gaussian_smooth(arr: np.ndarray, sigma: float) -> np.ndarray:
 
 @dataclass(frozen=True)
 class PrintParams:
+    """Physical print settings, validated to the ranges the API accepts."""
+
     width_mm: float = 100.0
     base_mm: float = 3.0
     exaggeration: float = 1.5

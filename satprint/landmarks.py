@@ -71,6 +71,8 @@ def truncated_sphere(
 
 @dataclass(frozen=True)
 class Landmark:
+    """A known building, matched by Wikidata or OSM id, and the rule that reshapes it."""
+
     name: str
     wikidata: str
     osm_id: str
@@ -364,6 +366,8 @@ def _christ(min_feature_m: float) -> tuple[np.ndarray, np.ndarray]:
 
 @dataclass(frozen=True)
 class MeshLandmark:
+    """A structure built as a mesh from code and placed at a fixed position."""
+
     name: str
     lon: float
     lat: float

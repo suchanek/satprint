@@ -250,8 +250,8 @@ curl -s localhost:7417/api/model -H 'content-type: application/json' -d '{
   are drawn wider than they are. Minor classes are left out of large areas,
   where they would cover the land. Roads stop at water and at buildings;
   tunnels, rail and ferries are left out. Areas are limited to 40 km², as
-  with buildings. At 1024 grid columns a dense city's roads add about as many
-  triangles as the terrain.
+  with buildings. On rough ground at a fine grid, roads stand up to 0.3 mm
+  taller so they clear the terrain everywhere.
 - **Roof shapes.** Roofs tagged `roof:shape` dome, onion, cone or pyramidal
   get that shape, from `roof:height` or `roof:levels`, else a hemisphere-like
   height from the footprint's size. Other roofs are flat. The vector tiles

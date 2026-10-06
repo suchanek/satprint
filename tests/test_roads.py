@@ -139,3 +139,70 @@ def test_narrow_roads_are_widened_and_filtered():
 def test_roads_stay_inside_the_block():
     m = build([(LineString([(-500, 2048), (4600, 2048)]), "primary")])
     assert m.vertices[:, 0].min() >= 0.0 and m.vertices[:, 0].max() <= WIDTH
+
+
+def _surface_at(m, xy, faces):
+    """Heights of the triangles ``faces`` of ``m`` at points ``xy``; NaN off them."""
+    import shapely
+
+    v = m.vertices.astype(float)
+    tris = shapely.polygons(v[faces][:, :, :2])
+    pts = shapely.points(xy)
+    hit_pt, hit_tri = shapely.STRtree(tris).query(pts, predicate="within")
+    z = np.full(len(xy), np.nan)
+    a, b, c = (v[faces[hit_tri, k]] for k in range(3))
+    p = xy[hit_pt]
+    det = (b[:, 0] - a[:, 0]) * (c[:, 1] - a[:, 1]) - (c[:, 0] - a[:, 0]) * (
+        b[:, 1] - a[:, 1]
+    )
+    wb = (
+        (p[:, 0] - a[:, 0]) * (c[:, 1] - a[:, 1])
+        - (c[:, 0] - a[:, 0]) * (p[:, 1] - a[:, 1])
+    ) / det
+    wc = (
+        (b[:, 0] - a[:, 0]) * (p[:, 1] - a[:, 1])
+        - (p[:, 0] - a[:, 0]) * (b[:, 1] - a[:, 1])
+    ) / det
+    z[hit_pt] = a[:, 2] + wb * (b[:, 2] - a[:, 2]) + wc * (c[:, 2] - a[:, 2])
+    return z
+
+
+def test_fine_grids_cut_roads_on_a_lattice_that_clears_the_terrain():
+    rows = cols = 401  # 0.25 mm cells
+    r = np.linspace(0, 1, rows)[:, None]
+    c = np.linspace(0, 1, cols)[None, :]
+    relief = 8 * c + 1.5 * np.sin(9 * r + 4 * c) + 0.05 * np.sin(150 * r * c)
+    relief -= relief.min()  # as heightmap_to_mesh would
+    roads = [
+        (LineString([(200, 300), (3900, 3700)]), "primary"),
+        (LineString([(100, 3500), (4000, 600)]), "primary"),
+    ]
+    exact = build(roads, relief=relief, lattice_mm=0.0)
+    m = build(roads, relief=relief)
+    assert check_watertight(m.as_mesh())["watertight"]
+    assert m.roof_faces.shape[0] < exact.roof_faces.shape[0] / 2
+    # At every terrain grid node under the road, the top is at least
+    # height_mm above the terrain and the floor at least sink_mm below it.
+    xs = np.linspace(0, WIDTH, cols)
+    ys = np.linspace(DEPTH, 0, rows)
+    gx, gy = np.meshgrid(xs, ys)
+    xy = np.column_stack([gx.ravel(), gy.ravel()])
+    ground = relief.ravel() + 3.0
+    floors = m.wall_faces[-m.roof_faces.shape[0] :]
+    top = _surface_at(m, xy, m.roof_faces)
+    bottom = _surface_at(m, xy, floors[:, ::-1])
+    on = ~np.isnan(top) & ~np.isnan(bottom)
+    assert on.sum() > 1000
+    assert (top[on] - ground[on] >= 0.4 - 1e-4).all()
+    assert (ground[on] - bottom[on] >= 0.3 - 1e-4).all()
+    assert (top[on] - ground[on]).max() < 0.4 + 2 * 0.3  # lifted no more than allowed
+
+
+def test_rough_fine_grids_fall_back_to_every_cell():
+    rng = np.random.default_rng(2)
+    relief = rng.uniform(0, 2, (401, 401))
+    road = [(LineString([(200, 2048), (3900, 2100)]), "primary")]
+    m = build(road, relief=relief)
+    exact = build(road, relief=relief, lattice_mm=0.0)
+    assert m.roof_faces.shape == exact.roof_faces.shape
+    assert check_watertight(m.as_mesh())["watertight"]

@@ -8,10 +8,13 @@ wide, so most roads are drawn wider than they are, and minor classes are left
 out of large areas, where they would cover the land (:data:`ROAD_MIN_SCALE`).
 
 The strips are joined into one footprint, with water and building footprints
-cut out, and the footprint is cut along the triangles of the terrain mesh.
-Each piece lies on one flat terrain triangle, so its top can sit exactly
-``height_mm`` above the terrain and its floor exactly ``sink_mm`` below it.
-Pieces share their vertices, and walls stand only on the footprint's outer
+cut out, and the footprint is cut along the triangles of a lattice of the
+terrain grid's nodes (:func:`_lattice`), every node on a coarse grid. Each
+piece lies on one flat lattice triangle, so its top sits a fixed height above
+the lattice surface; that height is ``height_mm`` plus however far the terrain
+rises above the lattice under the roads, so the top clears the terrain by at
+least ``height_mm`` and the floor sinks at least ``sink_mm`` into it. Pieces
+share their vertices, and walls stand only on the footprint's outer
 edges, as in :func:`satprint.mesh.heightmap_split_solids`, so each connected
 road network is a single closed solid. Tunnels are left out; bridges over
 water are :mod:`satprint.bridges`' job.
@@ -94,6 +97,8 @@ def road_mesh(
     min_width_mm: float = 0.8,
     simplify_mm: float = 0.05,
     min_area_mm2: float = 0.2,
+    lattice_mm: float = 0.6,
+    lattice_tol_mm: float = 0.3,
 ) -> BuildingMesh:
     """Roads as a thin solid on the terrain block built from ``relief_mm``.
 
@@ -112,6 +117,11 @@ def road_mesh(
     :param min_width_mm: narrowest a road is drawn.
     :param simplify_mm: footprint simplification tolerance.
     :param min_area_mm2: connected pieces smaller than this are dropped.
+    :param lattice_mm: roads are cut on a lattice of terrain grid nodes about
+        this far apart, not on every terrain cell (:func:`_lattice`).
+    :param lattice_tol_mm: the lattice is made finer until the terrain under
+        the roads strays no more than this from it. Roads are raised and
+        sunk by what strays, so they never sink into the terrain or float.
     :return: the roads as one :class:`BuildingMesh`, the tops as roofs;
         ``count`` is the number of connected road networks.
     """
@@ -152,9 +162,14 @@ def road_mesh(
     footprint = shapely.MultiPolygon(parts)
 
     # Grid node (r, c) is at (xs[c], ys[r]); cell (r, c) is split along its
-    # NW-SE diagonal into the two triangles heightmap_to_mesh draws.
+    # NW-SE diagonal into the two triangles heightmap_to_mesh draws. Roads
+    # are cut on a coarser lattice of those nodes, cut the same way.
     xs = np.linspace(0.0, width_mm, cols)
     ys = np.linspace(depth_mm, 0.0, rows)
+    ir, ic, above, below = _lattice(
+        relief, xs, ys, footprint, lattice_mm, lattice_tol_mm
+    )
+    xs, ys, relief = xs[ic], ys[ir], relief[np.ix_(ir, ic)]
     pieces, planes = _pieces(footprint, xs, ys)
     if not pieces:
         return BuildingMesh.empty()
@@ -198,10 +213,12 @@ def road_mesh(
     if not tops:
         return BuildingMesh.empty()
 
+    # The top clears the terrain by height_mm where it rises most above the
+    # lattice, and the floor sinks sink_mm where it dips most below it.
     top = np.asarray(xyz)
-    top[:, 2] += base_mm + height_mm
+    top[:, 2] += base_mm + height_mm + above
     bottom = top.copy()
-    bottom[:, 2] -= height_mm + sink_mm
+    bottom[:, 2] -= height_mm + sink_mm + above + below
     n = top.shape[0]
     roof = np.asarray(tops, dtype=np.int64)
     # Boundary edges are the directed top edges whose reverse is absent;
@@ -223,10 +240,64 @@ def road_mesh(
     )
 
 
+def _lattice(
+    relief: np.ndarray,
+    xs: np.ndarray,
+    ys: np.ndarray,
+    footprint,
+    lattice_mm: float,
+    tol_mm: float,
+) -> tuple[np.ndarray, np.ndarray, float, float]:
+    """A lattice of every ``step``-th terrain grid node, about ``lattice_mm``
+    apart, for cutting the roads on.
+
+    Cutting on every terrain cell follows the terrain exactly, but a fine
+    grid then gives the roads as many triangles as the terrain. The elevation
+    data is far coarser than a fine grid, so a lattice follows it closely.
+    Between lattice nodes the terrain strays from the lattice's surface; the
+    step is shortened until it strays no more than ``tol_mm`` under the roads.
+    Its diagonals lie on the grid's, so the most it strays is at a grid node.
+
+    :return: (lattice rows, lattice columns, how far the terrain rises above
+        the lattice surface and dips below it under the footprint).
+    """
+    rows, cols = relief.shape
+    cell = min(xs[1] - xs[0], ys[0] - ys[1])
+    gx, gy = np.meshgrid(xs, ys)
+    near = shapely.contains_xy(footprint.buffer(1.5 * cell), gx, gy)
+    r, c = np.nonzero(near)
+    step = max(1, int(lattice_mm / cell))
+    while True:
+        ir = np.unique(np.append(np.arange(0, rows, step), rows - 1))
+        ic = np.unique(np.append(np.arange(0, cols, step), cols - 1))
+        if step == 1:
+            return ir, ic, 0.0, 0.0
+        # Lattice cell of each node, and its place in that cell.
+        kr = np.clip(np.searchsorted(ir, r, side="right") - 1, 0, len(ir) - 2)
+        kc = np.clip(np.searchsorted(ic, c, side="right") - 1, 0, len(ic) - 2)
+        tr = (r - ir[kr]) / (ir[kr + 1] - ir[kr])
+        tc = (c - ic[kc]) / (ic[kc + 1] - ic[kc])
+        nw = relief[ir[kr], ic[kc]]
+        ne = relief[ir[kr], ic[kc + 1]]
+        sw = relief[ir[kr + 1], ic[kc]]
+        se = relief[ir[kr + 1], ic[kc + 1]]
+        flat = np.where(
+            tr >= tc,
+            nw + tr * (sw - nw) + tc * (se - sw),  # lower triangle
+            nw + tc * (ne - nw) + tr * (se - ne),  # upper triangle
+        )
+        stray = relief[r, c] - flat
+        above = float(max(stray.max(initial=0.0), 0.0))
+        below = float(max(-stray.min(initial=0.0), 0.0))
+        if max(above, below) <= tol_mm:
+            return ir, ic, above, below
+        step -= 1
+
+
 def _pieces(
     footprint, xs: np.ndarray, ys: np.ndarray
 ) -> tuple[list[Polygon], list[tuple[int, int, bool]]]:
-    """``footprint`` cut along the terrain triangles.
+    """``footprint`` cut along the triangles of the grid with nodes ``xs``, ``ys``.
 
     :return: (pieces, (row, col, upper triangle) of each piece's triangle).
     """

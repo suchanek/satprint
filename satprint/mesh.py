@@ -23,9 +23,18 @@ from typing import overload
 
 import numpy as np
 
-# Where write_3mf centers the model: the middle of a 256 mm Bambu plate
-# (A1, P1, X1).
-PLATE_CENTER_MM = (128.0, 128.0)
+# Build plates write_3mf can center the model on: name -> (width, depth) mm.
+PLATES = {
+    "256": (256.0, 256.0),  # Bambu A1, P1, X1
+    "180": (180.0, 180.0),  # Bambu A1 mini
+}
+PLATE_CENTER_MM = (PLATES["256"][0] / 2, PLATES["256"][1] / 2)
+
+
+def plate_center(plate: str) -> tuple[float, float]:
+    """The (x, y) center in mm of the plate named in :data:`PLATES`."""
+    width, depth = PLATES[plate]
+    return width / 2, depth / 2
 
 
 @dataclass(frozen=True)

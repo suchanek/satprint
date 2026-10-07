@@ -31,6 +31,7 @@ from .mesh import (
     heightmap_to_mesh,
     merge_building_meshes,
     merge_meshes,
+    plate_center,
     write_3mf,
     write_binary_stl,
     write_glb,
@@ -220,6 +221,11 @@ class ModelRequest(BaseModel):
         False,
         description="also write a 3MF with land, water and buildings as separate "
         "parts, for multi-material printers (terrarium source only)",
+    )
+    plate: Literal["256", "180"] = Field(
+        "256",
+        description="build plate the 3MF is centered on: 256 mm (Bambu A1, P1, "
+        "X1) or 180 mm (A1 mini)",
     )
     name: str = Field("terrain", max_length=60)
 
@@ -645,7 +651,12 @@ def create_app(
             if (rmesh and rmesh.count) or (brmesh and brmesh.count):
                 sources.append(OSM_ATTRIBUTION)
             credits = "; ".join(dict.fromkeys(sources)) or None
-            threemf = write_3mf(parts, name=req.name, attribution=credits)
+            threemf = write_3mf(
+                parts,
+                name=req.name,
+                attribution=credits,
+                plate_center=plate_center(req.plate),
+            )
             multicolor_info.update(
                 {
                     "multicolor_parts": [p[0] for p in parts if p[1].faces.shape[0]],

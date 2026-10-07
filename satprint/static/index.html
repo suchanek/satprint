@@ -107,6 +107,11 @@
           <option value="all">All roads and paths</option>
         </select></label>
       <label class="switch"><input type="checkbox" id="multicolor"> Multi-color 3MF: land, water, buildings, roads and border as separate parts (multi-material printers)</label>
+      <label>3MF plate <span class="unit">model is centered on it</span>
+        <select id="plate">
+          <option value="256" selected>256 mm: Bambu A1, P1, X1</option>
+          <option value="180">180 mm: Bambu A1 mini</option>
+        </select></label>
       <label>Border frame <span class="unit">mm wide, 0 = none</span>
         <input type="number" id="frame_mm" min="0" max="30" step="0.5" value="0"></label>
       <label>Frame height <span class="unit">mm, blank = base + 1</span>

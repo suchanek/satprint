@@ -145,13 +145,16 @@ To print it on a Bambu printer with an AMS:
    sidebar, or sync them from the AMS.
 2. Open the 3MF. Bambu Studio reports that it loads "geometry only", as it does
    for any 3MF it did not write; the part names and filaments still come
-   through. The model lands centered on a 256 mm plate (A1, P1, X1).
+   through. The model lands centered on the plate you chose: 256 mm (A1, P1, X1) or
+   180 mm (A1 mini).
 3. To check or change a part's filament, open the object list: in the left
    sidebar, under **Process**, click **Objects** and expand the model.
 4. Slice. The preview shows each part in its filament's color.
 
 Other slicers open the same parts with every part on filament 1; assign the
-filaments by hand.
+filaments by hand. If Bambu Studio says a G-code path goes beyond the plate
+boundaries, drag the prime tower inward; see
+[Print in several colors](https://suchanek.github.io/satprint/multicolor/).
 
 ## Command line
 

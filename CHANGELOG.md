@@ -6,32 +6,33 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
-### Changed
+### Added
 
-- **Water in the multi-color 3MF is a 0.6 mm skin.** The land filament now
-  fills the base under the water, so the lower layers need no filament change
-  for water. On the Boston Downtown preset at 0.1 mm layers this cuts the
-  filament changes from 114 to 89. Where water meets the block's walls, the
-  side shows a thin blue band over green instead of a blue column.
-- **The border prints in the land filament.** A gray border ran the full
-  height of the base and added a filament change to every layer of it. With
-  the water skin, Boston Downtown drops to 63 changes at 0.1 mm layers. The
-  border is still its own part, so it can take another filament in the
-  slicer.
+- **Choose the plate the 3MF is centered on.** The web app has a **3MF
+  plate** menu and the CLI a `--plate` option: 256 mm for the Bambu A1, P1
+  and X1 (the default), or 180 mm for the A1 mini.
 
 ### Changed
 
 - **The multi-color 3MF needs four filaments, not five.** Parts of one color
-  now share a filament, and roads and border are the same gray, so the model
-  fits the four slots of an AMS lite. Bridges moved from the `buildings` part
-  to the `roads` part, so they print gray like the roads.
+  now share a filament, so the model fits the four slots of an AMS lite: land
+  1, water 2, buildings 3 and roads 4. Bridges moved from the `buildings` part
+  to the `roads` part and print gray with the roads.
+- **The border prints in the land filament.** A gray border ran the full
+  height of the base and added a filament change to every layer of it. It is
+  still its own part, so it can take another filament in the slicer.
+- **Water in the multi-color 3MF is a 0.6 mm skin.** The land filament fills
+  the base under the water, so the lower layers need no filament change for
+  water. Where water meets the block's walls, the side shows a thin blue band
+  over green instead of a blue column. With the green border, the Boston
+  Downtown preset drops from 114 filament changes to 63 at 0.1 mm layers, and
+  from 192 to 106 at 0.06 mm.
 
 ### Fixed
 
 - **The multi-color 3MF opens centered on the plate.** The model was written
   at the origin, with the border reaching to -3 mm, so a slicer that kept
-  that position put a corner off the plate. The build item now centers the
-  footprint on a 256 mm Bambu plate (A1, P1, X1).
+  that position put a corner off the plate.
 
 ## [0.4.1] - 2026-10-06
 

@@ -1,20 +1,22 @@
-# Release Notes -- v0.4.1
+# Release Notes -- v0.5.0
 
-> Released: 2026-10-06
+> Released: 2026-10-07
 
-satprint 0.4.1 is a bug-fix release for city models. It came out of slicing the Eiffel Tower and Berlin Mitte presets in Bambu Studio. Short bridges no longer leave decks floating over the water, and lone buildings too small to print are left out. The web app also now loads its new controls on the first visit after an upgrade.
+satprint 0.5.0 makes the multi-color 3MF easier to print on a Bambu printer. It came out of slicing the Boston Downtown and Gateway Arch presets on an A1 with a 0.2 mm nozzle. The 3MF now needs four filaments instead of five, so it fits an AMS lite, it opens centered on the plate, and its base prints in one filament, which cuts the number of filament changes by about 45 percent.
 
 ## What changed
 
-**Short bridges stand on a pier.** OpenStreetMap maps gangways out to moored boats as bridges. On the model each one is a deck about a millimeter long that reaches no bank. A deck shorter than the pier spacing got no pier, so it hung above the water with nothing under it, and Bambu Studio warned that the Eiffel Tower model had floating regions. A bridge piece with no bank now always stands on at least one pier in the water, even when piers are turned off. Bridges that reach a bank are unchanged.
+**Four filaments.** Parts of one color now share a filament: land is filament 1, water 2, buildings 3 and roads 4. Bridges moved from the buildings part to the roads part, so they print gray with the roads instead of white with the buildings. The border prints in the land filament. Each is still its own part, so any of them can take another filament in the slicer.
 
-**Lone buildings too small to print are left out.** A shed or kiosk under 0.4 mm² on the model is too small for a 0.4 mm nozzle to print with real walls, so it printed as a blob. When it touches no other building it is now dropped. A small building against a neighbor is kept, so city blocks and buildings made of several parts keep their shape. Berlin Mitte loses 114 such buildings. The threshold is `MIN_ALONE_MM2`, also the `min_alone_mm2` parameter of `building_mesh`.
+**Centered on the plate.** The model used to be written at the origin, with the border reaching to -3 mm, so a slicer that kept that position put a corner off the plate. The 3MF now centers the model on a 256 mm plate for the Bambu A1, P1 and X1, or on a 180 mm plate for the A1 mini. Choose the plate under **3MF plate** in the web app or with `--plate` on the command line.
 
-**New controls work on the first load after an upgrade.** The page now requests its script and stylesheet with the version in the URL, so a browser fetches fresh copies after an upgrade. Before, a browser could pair the new page with an old cached script, and controls such as the Roads checkbox showed but did nothing.
+**Fewer filament changes.** The water part ran from the bottom of the base to the water surface, and the gray border ran the full height of the base, so every layer from the first one needed two or three filament changes. The water is now a 0.6 mm skin with the land filament under it, and the border is green, so the bottom of the print needs no changes at all. On Boston Downtown the count drops from 114 changes to 63 at 0.1 mm layers, and from 192 to 106 at 0.06 mm. Where water reaches the edge of the model, the side shows a thin blue band over green instead of a blue column.
+
+**Troubleshooting for multi-color prints.** The multi-color guide has a new section on what to do when slicing fails or warns: the prime tower running past the plate edge (common on 0.2 mm nozzle presets, where thin layers make the tower larger), floating-cantilever warnings on bridges, and where the time goes in a long print.
 
 ## Upgrading
 
-Nothing to do. Models with bridges or very small buildings come out slightly different from 0.4.0. Everything else is unchanged.
+Nothing to do, but 3MF files come out different from 0.4.1: filament numbers, the part that holds the bridges, the border color and the shape of the water part have all changed. Generate a 3MF again rather than reusing slicer settings saved against an old one. STL and GLB output is unchanged.
 
 ---
 

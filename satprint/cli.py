@@ -27,11 +27,13 @@ from .buildings import (
     building_mesh,
 )
 from .mesh import (
+    PLATES,
     check_watertight,
     frame_mesh,
     heightmap_to_mesh,
     merge_building_meshes,
     merge_meshes,
+    plate_center,
     write_3mf,
     write_binary_stl,
     write_glb,
@@ -259,6 +261,7 @@ def _build(args) -> int:
                     parts,
                     name=args.name,
                     attribution="; ".join(dict.fromkeys(credits)),
+                    plate_center=plate_center(args.plate),
                 )
             )
         info["water_fraction"] = round(float(mask.mean()), 4)
@@ -352,6 +355,13 @@ def main(argv=None) -> int:
         help="also write a multi-color 3MF here: land, water, buildings, "
         "roads (and bridges) and border as separate parts on four filaments, "
         "the border on the land filament (needs --bbox)",
+    )
+    b.add_argument(
+        "--plate",
+        choices=list(PLATES),
+        default="256",
+        help="build plate the 3MF is centered on, in mm: 256 (Bambu A1, P1, "
+        "X1) or 180 (A1 mini)",
     )
     b.add_argument(
         "--buildings",

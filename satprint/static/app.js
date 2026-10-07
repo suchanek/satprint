@@ -422,6 +422,7 @@ $("btn-generate").addEventListener("click", async () => {
     smoothing: +$("smoothing").value, clamp_sea_level: $("clamp").checked, texture: $("texture").checked,
     buildings: $("buildings").checked, building_scale: +$("building_scale").value || 1,
     bridges: $("bridges").checked, building_source: $("building_source").value, multicolor: $("multicolor").checked,
+    plate: $("plate").value,
     roads: $("roads").checked, road_detail: $("road_detail").value,
     frame_mm: +$("frame_mm").value || 0,
     frame_height_mm: $("frame_height_mm").value ? +$("frame_height_mm").value : null,

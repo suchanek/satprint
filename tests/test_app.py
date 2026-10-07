@@ -641,6 +641,34 @@ def test_frame_goes_into_stl_glb_and_3mf():
     assert min(a["min"][0] for a in xs) == pytest.approx(-0.006, abs=1e-6)
 
 
+@pytest.mark.parametrize("plate, center", [(None, 128.0), ("180", 90.0)])
+def test_3mf_is_centered_on_the_chosen_plate(plate, center):
+    import xml.etree.ElementTree as ET
+    import zipfile
+
+    client = make_client(vector_tiles=FakeVectorTiles())
+    body = {
+        "source": "terrarium",
+        "resolution": 64,
+        "bbox": {"south": 40.84, "west": -73.99, "north": 40.85, "east": -73.98},
+        "width_mm": 100,
+        "multicolor": True,
+        "frame_mm": 6,
+    }
+    if plate:
+        body["plate"] = plate
+    j = client.post("/api/model", json=body).json()
+    with zipfile.ZipFile(io.BytesIO(client.get(j["threemf_url"]).content)) as z:
+        root = ET.fromstring(z.read("3D/3dmodel.model"))
+    ns = {"m": "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"}
+    (item,) = root.findall("m:build/m:item", ns)
+    dx, dy = (float(v) for v in item.get("transform").split()[9:11])
+    # the model with its frame spans -6 .. 106 in x
+    assert dx + 50 == pytest.approx(center, abs=1e-3)
+    assert dy + j["info"]["depth_mm"] / 2 == pytest.approx(center, abs=1e-3)
+    assert client.post("/api/model", json={**body, "plate": "999"}).status_code == 422
+
+
 def test_openfreemap_keeps_flat_roofs_when_shapes_fail():
     client = make_client(
         vector_tiles=FakeVectorTiles(), overpass=FakeOverpass(fail=True)

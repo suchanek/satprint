@@ -635,7 +635,7 @@ def test_frame_goes_into_stl_glb_and_3mf():
     }
     border = [p for p in cfg.iter("part") if any(m.get("value") == "border" for m in p)]
     assert parts == {"land", "water", "buildings", "border"}
-    assert [m.get("value") for m in border[0] if m.get("key") == "extruder"] == ["4"]
+    assert [m.get("value") for m in border[0] if m.get("key") == "extruder"] == ["1"]
     doc, _ = read_glb(client.get(j["glb_url"]).content)
     xs = [a for a in doc["accessors"] if a["type"] == "VEC3" and "min" in a]
     assert min(a["min"][0] for a in xs) == pytest.approx(-0.006, abs=1e-6)

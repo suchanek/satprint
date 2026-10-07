@@ -8,6 +8,19 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ### Changed
 
+- **Water in the multi-color 3MF is a 0.6 mm skin.** The land filament now
+  fills the base under the water, so the lower layers need no filament change
+  for water. On the Boston Downtown preset at 0.1 mm layers this cuts the
+  filament changes from 114 to 89. Where water meets the block's walls, the
+  side shows a thin blue band over green instead of a blue column.
+- **The border prints in the land filament.** A gray border ran the full
+  height of the base and added a filament change to every layer of it. With
+  the water skin, Boston Downtown drops to 63 changes at 0.1 mm layers. The
+  border is still its own part, so it can take another filament in the
+  slicer.
+
+### Changed
+
 - **The multi-color 3MF needs four filaments, not five.** Parts of one color
   now share a filament, and roads and border are the same gray, so the model
   fits the four slots of an AMS lite. Bridges moved from the `buildings` part

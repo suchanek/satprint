@@ -245,6 +245,7 @@ def heightmap_split_solids(
     depth_mm: float,
     base_mm: float,
     cell_mask: np.ndarray,
+    skin_mm: float | None = None,
 ) -> tuple[Mesh, Mesh]:
     """Split the :func:`heightmap_to_mesh` block into two closed solids.
 
@@ -254,11 +255,17 @@ def heightmap_split_solids(
     the same block. ``cell_mask`` must have no 2x2 checkerboards (see
     ``water._fix_diagonals``), or the solids touch along a single edge.
 
+    With ``skin_mm``, the masked solid is only a skin that thick under the
+    terrain, and the unmasked solid fills the block beneath it, so the lower
+    layers print in one filament. Where the terrain is thinner than twice the
+    skin, the skin is half the terrain height.
+
     :param relief_mm: (rows, cols) heights above the base top, row 0 north.
     :param width_mm: block width.
     :param depth_mm: block depth.
     :param base_mm: base thickness under the lowest terrain point.
     :param cell_mask: (rows-1, cols-1) booleans, one per grid cell.
+    :param skin_mm: thickness of the masked solid; None for full columns.
     :return: (masked solid, unmasked solid); either may have no faces.
     """
     relief = np.asarray(relief_mm, dtype=np.float64)
@@ -274,42 +281,84 @@ def heightmap_split_solids(
     top = np.column_stack([gx.ravel(), gy.ravel(), (relief + base_mm).ravel()])
     bottom = top.copy()
     bottom[:, 2] = 0.0
-    vertices = np.vstack([top, bottom])
+    # Vertex k is grid node k on the terrain, k + n on the floor and k + low
+    # at the bottom of the skin.
+    low = 2 * n
+    under = top.copy()
+    under[:, 2] -= np.minimum(skin_mm or 0.0, top[:, 2] / 2)
+    vertices = np.vstack([top, bottom, under])
+    key = 3 * n  # edge (u, v) -> u * key + v
 
     r = np.arange(rows - 1)[:, None]
     c = np.arange(cols - 1)[None, :]
     a = (r * cols + c).ravel()
     b, d = a + 1, a + cols
     e = d + 1
+    empty = Mesh(np.zeros((0, 3), np.float32), np.zeros((0, 3), np.int64))
 
-    def solid(cells: np.ndarray) -> Mesh:
-        if not cells.any():
-            return Mesh(np.zeros((0, 3), np.float32), np.zeros((0, 3), np.int64))
+    def cell_tops(cells: np.ndarray) -> np.ndarray:
         ca, cb, cd, ce = a[cells], b[cells], d[cells], e[cells]
-        tops = np.concatenate(
+        return np.concatenate(
             [np.column_stack([ca, cd, ce]), np.column_stack([ca, ce, cb])]
         )
-        floors = tops[:, ::-1] + n
-        # Boundary edges are the directed top edges whose reverse is absent;
-        # each gets a wall facing out of the region, as the block's walls do.
+
+    def edges(tops: np.ndarray) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+        """Directed top edges whose reverse is absent, and all edge keys."""
         u = tops.ravel()
         v = np.roll(tops, -1, axis=1).ravel()
-        fwd = u * (2 * n) + v
-        rev = v * (2 * n) + u
-        edge = ~np.isin(fwd, rev)
-        u, v = u[edge], v[edge]
-        walls = np.concatenate(
-            [np.column_stack([u + n, v + n, v]), np.column_stack([u + n, v, u])]
-        )
-        faces = np.vstack([tops, walls, floors])
-        used, remap = np.unique(faces, return_inverse=True)
-        return Mesh(
-            vertices=vertices[used].astype(np.float32),
-            faces=remap.reshape(faces.shape).astype(np.int64),
+        fwd = u * key + v
+        edge = ~np.isin(fwd, v * key + u)
+        return u[edge], v[edge], fwd
+
+    def wall(lo_u, lo_v, hi_u, hi_v) -> np.ndarray:
+        """Quads under top edges hi_u -> hi_v, facing out of the region."""
+        return np.concatenate(
+            [np.column_stack([lo_u, lo_v, hi_v]), np.column_stack([lo_u, hi_v, hi_u])]
         )
 
+    def mesh(*faces: np.ndarray) -> Mesh:
+        f = np.vstack(faces)
+        used, remap = np.unique(f, return_inverse=True)
+        return Mesh(
+            vertices=vertices[used].astype(np.float32),
+            faces=remap.reshape(f.shape).astype(np.int64),
+        )
+
+    def column(cells: np.ndarray, floor: int) -> Mesh:
+        """Cells from the terrain down to the floor (n) or the skin (low)."""
+        if not cells.any():
+            return empty
+        tops = cell_tops(cells)
+        u, v, _ = edges(tops)
+        return mesh(tops, wall(u + floor, v + floor, u, v), tops[:, ::-1] + floor)
+
     mask = cell_mask.ravel()
-    return solid(mask), solid(~mask)
+    if not skin_mm:
+        return column(mask, n), column(~mask, n)
+    if not mask.any():
+        return empty, column(~mask, n)
+
+    # The unmasked solid: its own cells to the terrain, the masked cells to
+    # the bottom of the skin, both down to the floor. Every outer wall is cut
+    # at the skin height so the two kinds of wall meet edge to edge.
+    tops = np.vstack([cell_tops(~mask), cell_tops(mask) + low])
+    u, v, fwd = edges(tops)
+    raised = u < n
+    step = raised & np.isin((v + low) * key + u + low, fwd)
+    sunk = ~raised & np.isin((v - low) * key + u - low, fwd)
+    rim = raised & ~step
+    lo_rim = ~raised & ~sunk
+    ur, vr, us, vs = u[rim], v[rim], u[lo_rim] - low, v[lo_rim] - low
+    base = np.where(tops >= low, tops - low, tops)
+    land = mesh(
+        tops,
+        wall(u[step] + low, v[step] + low, u[step], v[step]),
+        wall(ur + n, vr + n, ur + low, vr + low),
+        wall(ur + low, vr + low, ur, vr),
+        wall(us + n, vs + n, us + low, vs + low),
+        base[:, ::-1] + n,
+    )
+    return column(mask, low), land
 
 
 def write_3mf(

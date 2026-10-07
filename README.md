@@ -23,7 +23,7 @@
 satprint turns real elevation data into a solid relief model scaled to your
 printer: the terrain on top, four walls and a flat base. Cities can carry their
 OpenStreetMap buildings, and the multi-color 3MF splits the model into land,
-water, buildings and a border frame, one filament each.
+water, buildings, roads and a border frame on four filaments.
 
 **Documentation: [suchanek.github.io/satprint](https://suchanek.github.io/satprint/)**
 
@@ -67,8 +67,9 @@ exaggeration:
 - **Roads** from OpenStreetMap, as raised strips that follow the terrain, in
   the STL, GLB and 3MF. Which roads are drawn depends on the model scale.
 - **Multi-color 3MF.** Land, water, buildings, roads and an optional border
-  frame are separate parts of one object, already on filaments 1 to 5 in
-  Bambu Studio.
+  frame are separate parts of one object, already on filaments 1 to 4 in
+  Bambu Studio and centered on the plate. Roads, bridges and border share a
+  gray filament.
   Water is the OSM sea, rivers and lakes, plus the flattened sea.
 - **Border frame.** A rectangular rim around the model, 1 mm above the base by
   default, in the STL, GLB and 3MF.
@@ -124,7 +125,8 @@ After you change the code, restart `satprint serve` to pick up the change.
 
 ## Print in several colors
 
-The multi-color 3MF holds up to five parts, in this filament order:
+The multi-color 3MF holds up to five parts on up to four filaments, so it
+fits an AMS lite:
 
 | Filament | Part | Display color |
 |---|---|---|
@@ -132,18 +134,19 @@ The multi-color 3MF holds up to five parts, in this filament order:
 | 2 | `water` | blue |
 | 3 | `buildings` | white |
 | 4 | `roads` | dark gray |
-| 5 | `border` | dark gray |
+| 4 | `border` | dark gray |
 
-Bridges share the `buildings` part. Parts without geometry are left out, and
-the parts after them move up a filament.
+Roads and the border share one gray filament, and bridges are in the `roads`
+part. Parts without geometry are left out, and the filaments after them move
+up one.
 
 To print it on a Bambu printer with an AMS:
 
-1. In Bambu Studio, set up one filament per part, up to five, in the left
+1. In Bambu Studio, set up one filament per color, up to four, in the left
    sidebar, or sync them from the AMS.
 2. Open the 3MF. Bambu Studio reports that it loads "geometry only", as it does
    for any 3MF it did not write; the part names and filaments still come
-   through.
+   through. The model lands centered on a 256 mm plate (A1, P1, X1).
 3. To check or change a part's filament, open the object list: in the left
    sidebar, under **Process**, click **Objects** and expand the model.
 4. Slice. The preview shows each part in its filament's color.

@@ -1,7 +1,7 @@
 # Print in several colors
 
-The multi-color 3MF holds up to five parts of one object, in this filament
-order:
+The multi-color 3MF holds up to five parts of one object on up to four
+filaments, so it fits an AMS lite:
 
 | Filament | Part | Display color |
 |---|---|---|
@@ -9,12 +9,12 @@ order:
 | 2 | `water` | blue |
 | 3 | `buildings` | white |
 | 4 | `roads` | dark gray |
-| 5 | `border` | dark gray |
+| 4 | `border` | dark gray |
 
-Bridges share the `buildings` part. Parts without geometry are left out, and
-the parts after them move up a filament: there is no `buildings` part without
-buildings or bridges, no `roads` part without roads, and no `border` part
-without a frame.
+Roads and the border share one gray filament, and bridges are in the `roads`
+part. Parts without geometry are left out, and the filaments after them move
+up one: there is no `buildings` part without buildings, no `roads` part
+without roads or bridges, and no `border` part without a frame.
 
 ## Make one
 
@@ -30,11 +30,11 @@ satprint build --bbox 45.43 12.32 45.446 12.343 --buildings --frame 5 \
 
 ## Print it on a Bambu printer
 
-1. In Bambu Studio, set up one filament per part, up to five, in the left
+1. In Bambu Studio, set up one filament per color, up to four, in the left
    sidebar, or sync them from the AMS.
 2. Open the 3MF. Bambu Studio reports that it loads "geometry only", as it does
    for any 3MF it did not write. The part names and filaments still come
-   through.
+   through. The model lands centered on a 256 mm plate (A1, P1, X1).
 3. To check or change a part's filament, open the object list: in the left
    sidebar, under **Process**, click **Objects** and expand the model.
 4. Slice. The preview shows each part in its filament's color, and a prime
@@ -57,9 +57,9 @@ filaments by hand.
   together. A river narrower than one grid cell does not show, so raise the
   resolution to keep it.
 - **Buildings** are the same solids as in the STL, sunk 0.3 mm into the
-  terrain. Slicers resolve that overlap. Bridges are in this part too, so a
-  bridge prints in the buildings filament.
+  terrain. Slicers resolve that overlap.
 - **Roads** are the same raised strips as in the STL, sunk 0.3 mm into the
-  terrain like the buildings.
+  terrain like the buildings. Bridges are in this part too, so a bridge
+  prints in the road gray.
 - **Border** is a closed rectangular ring against the walls of the block, 1 mm
   above the base by default.

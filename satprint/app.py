@@ -574,9 +574,6 @@ def create_app(
                     if brmesh.count:
                         top = float(brmesh.vertices[:, 2].max())
                         info["height_mm"] = max(info["height_mm"], top)
-                        bmesh = merge_building_meshes(
-                            *(m for m in (bmesh, brmesh) if m)
-                        )
         rmesh: BuildingMesh | None = None
         if req.roads and hm.bbox is not None:
             area = bbox_area_km2(hm.bbox)
@@ -612,7 +609,7 @@ def create_app(
                         top = float(rmesh.vertices[:, 2].max())
                         info["height_mm"] = max(info["height_mm"], top)
         # buildings, bridges and roads: everything standing on the terrain
-        extras = merge_building_meshes(*(m for m in (bmesh, rmesh) if m))
+        extras = merge_building_meshes(*(m for m in (bmesh, brmesh, rmesh) if m))
         credit = building_info.get("building_attribution", OSM_ATTRIBUTION)
         if progress:
             progress("writing files", 0, 0)
@@ -640,11 +637,12 @@ def create_app(
                 buildings=bmesh,
                 frame=frame,
                 roads=rmesh,
+                bridges=brmesh,
             )
             sources = [OSM_ATTRIBUTION] if polygons else []
             if bmesh and bmesh.count:
                 sources.append(credit)
-            if rmesh and rmesh.count:
+            if (rmesh and rmesh.count) or (brmesh and brmesh.count):
                 sources.append(OSM_ATTRIBUTION)
             credits = "; ".join(dict.fromkeys(sources)) or None
             threemf = write_3mf(parts, name=req.name, attribution=credits)
@@ -667,7 +665,8 @@ def create_app(
                 credits = IMAGERY_ATTRIBUTION
                 if bmesh and bmesh.count:
                     credits += "; " + credit
-                if rmesh and rmesh.count and OSM_ATTRIBUTION not in credits:
+                osm = (rmesh and rmesh.count) or (brmesh and brmesh.count)
+                if osm and OSM_ATTRIBUTION not in credits:
                     credits += "; " + OSM_ATTRIBUTION
                 glb = write_glb(
                     body,

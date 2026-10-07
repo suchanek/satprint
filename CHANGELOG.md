@@ -6,6 +6,20 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Changed
+
+- **The multi-color 3MF needs four filaments, not five.** Parts of one color
+  now share a filament, and roads and border are the same gray, so the model
+  fits the four slots of an AMS lite. Bridges moved from the `buildings` part
+  to the `roads` part, so they print gray like the roads.
+
+### Fixed
+
+- **The multi-color 3MF opens centered on the plate.** The model was written
+  at the origin, with the border reaching to -3 mm, so a slicer that kept
+  that position put a corner off the plate. The build item now centers the
+  footprint on a 256 mm Bambu plate (A1, P1, X1).
+
 ## [0.4.1] - 2026-10-06
 
 ### Fixed

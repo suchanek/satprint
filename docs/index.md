@@ -10,7 +10,7 @@ base. You get three files from the same model:
 
 - a watertight **STL** of the terrain and its buildings, for a one-color print;
 - a **multi-color 3MF** that splits the model into land, water, buildings and a
-  border frame, one filament each, for a multi-material printer;
+  border frame on four filaments, for a multi-material printer;
 - a **GLB** with satellite imagery draped over the terrain and the roofs, for
   viewing in Blender, macOS Quick Look or a web viewer.
 
@@ -57,9 +57,9 @@ Francisco, printed in their own color from the 3MF:
   solids pass through each other.
 - **Bridges** over water from OpenStreetMap, as a raised deck on piers.
 - **Roads** from OpenStreetMap, as raised strips that follow the terrain.
-- **Five colors.** Land, water, buildings, roads and a border frame are
-  separate parts of one 3MF object, already on filaments 1 to 5 in Bambu
-  Studio.
+- **Four filaments.** Land, water, buildings, roads and a border frame are
+  separate parts of one 3MF object, already on filaments 1 to 4 in Bambu
+  Studio and centered on the plate. Roads, bridges and border share a gray.
 - **Search and presets.** Search any place by name, or pick one of 70 presets:
   40 cities and landmarks and 30 mountains and landscapes.
 

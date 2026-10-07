@@ -417,11 +417,11 @@ def test_bridges_work_with_buildings_in_the_glb_and_3mf():
     }
     j = client.post("/api/model", json=body).json()
     info = j["info"]
-    # bridges share the buildings part, and OSM is credited without buildings
+    # bridges share the roads part, and OSM is credited without buildings
     assert info["bridges"] >= 1 and info["multicolor_parts"] == [
         "land",
         "water",
-        "buildings",
+        "roads",
     ]
     doc, _ = read_glb(client.get(j["glb_url"]).content)
     assert "OpenStreetMap" in doc["asset"]["copyright"]

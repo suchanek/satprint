@@ -23,6 +23,10 @@ from typing import overload
 
 import numpy as np
 
+# Where write_3mf centers the model: the middle of a 256 mm Bambu plate
+# (A1, P1, X1).
+PLATE_CENTER_MM = (128.0, 128.0)
+
 
 @dataclass(frozen=True)
 class Mesh:
@@ -312,19 +316,23 @@ def write_3mf(
     parts: list[tuple[str, Mesh, str]],
     name: str = "satprint",
     attribution: str | None = None,
+    plate_center: tuple[float, float] = PLATE_CENTER_MM,
 ) -> bytes:
     """Serialize ``parts`` as one 3MF object made of named, colored parts.
 
     Slicers (Bambu Studio, OrcaSlicer, PrusaSlicer) open it as one object
-    with one part per entry, so each part can take its own filament. A
-    Bambu-style ``Metadata/model_settings.config`` names the parts and puts
-    part *n* on filament *n*, which Bambu Studio reads; other slicers ignore
-    it. The colors are display hints only.
+    with one part per entry. A Bambu-style ``Metadata/model_settings.config``
+    names the parts and gives each distinct color its own filament, numbered
+    in order of first use, so parts of one color share a filament. Bambu
+    Studio reads it; other slicers ignore it. The colors are display hints
+    only. The build item moves the model so its footprint is centered on
+    ``plate_center``.
 
     :param parts: (part name, mesh in mm, ``#RRGGBB`` color); empty meshes
         are skipped.
     :param name: object name.
     :param attribution: data credits, stored as the 3MF ``Copyright``.
+    :param plate_center: (x, y) plate center in mm.
     :return: the 3MF file contents.
     """
     from xml.sax.saxutils import escape, quoteattr
@@ -332,6 +340,10 @@ def write_3mf(
     parts = [p for p in parts if p[1].faces.shape[0]]
     if not parts:
         raise ValueError("no parts with faces to write")
+    filament = {c: i + 1 for i, c in enumerate(dict.fromkeys(p[2] for p in parts))}
+    lo = np.min([p[1].vertices.min(axis=0) for p in parts], axis=0)
+    hi = np.max([p[1].vertices.max(axis=0) for p in parts], axis=0)
+    dx, dy = np.asarray(plate_center) - (lo[:2] + hi[:2]) / 2
     out = [
         '<?xml version="1.0" encoding="UTF-8"?>\n',
         '<model unit="millimeter" xml:lang="en-US" '
@@ -370,7 +382,10 @@ def write_3mf(
     )
     out.extend(f'<component objectid="{i + 2}"/>\n' for i in range(len(parts)))
     out.append("</components>\n</object>\n</resources>\n")
-    out.append(f'<build>\n<item objectid="{parent}"/>\n</build>\n</model>\n')
+    out.append(
+        f'<build>\n<item objectid="{parent}" '
+        f'transform="1 0 0 0 1 0 0 0 1 {dx:.4f} {dy:.4f} 0"/>\n</build>\n</model>\n'
+    )
 
     buf = io.BytesIO()
     with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as z:
@@ -399,11 +414,11 @@ def write_3mf(
             f'    <metadata key="name" value={quoteattr(name)}/>\n'
             '    <metadata key="extruder" value="1"/>\n',
         ]
-        for i, (part_name, _, _) in enumerate(parts):
+        for i, (part_name, _, color) in enumerate(parts):
             cfg.append(
                 f'    <part id="{i + 2}" subtype="normal_part">\n'
                 f'      <metadata key="name" value={quoteattr(part_name)}/>\n'
-                f'      <metadata key="extruder" value="{i + 1}"/>\n'
+                f'      <metadata key="extruder" value="{filament[color]}"/>\n'
                 "    </part>\n"
             )
         cfg.append("  </object>\n</config>\n")

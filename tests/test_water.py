@@ -153,6 +153,54 @@ def test_3mf_is_one_object_of_named_colored_parts():
         write_3mf([("x", empty, "#000000")])
 
 
+def test_3mf_parts_of_one_color_share_a_filament_and_center_on_plate():
+    block = heightmap_to_mesh(np.zeros((3, 3)), 40, 30, 2)
+    ring = Mesh(block.vertices + np.float32([-3, -3, 0]), block.faces)
+    data = write_3mf(
+        [
+            ("land", block, "#8A9A5B"),
+            ("roads", block, "#4A4A4A"),
+            ("border", ring, "#4A4A4A"),
+        ],
+        plate_center=(100, 90),
+    )
+    with zipfile.ZipFile(io.BytesIO(data)) as z:
+        root = ET.fromstring(z.read("3D/3dmodel.model"))
+        cfg = ET.fromstring(z.read("Metadata/model_settings.config"))
+    extruders = [
+        m.get("value") for m in cfg.iter("metadata") if m.get("key") == "extruder"
+    ]
+    assert extruders == ["1", "1", "2", "2"]  # object, then land, roads, border
+    # footprint x -3..40, y -3..30: center (18.5, 13.5) moves to (100, 90)
+    (item,) = root.findall("m:build/m:item", NS)
+    t = [float(v) for v in item.get("transform").split()]
+    assert t[:9] == [1, 0, 0, 0, 1, 0, 0, 0, 1]
+    assert t[9:] == pytest.approx([81.5, 76.5, 0])
+
+
+def test_bridges_print_with_the_roads():
+    from satprint.mesh import BuildingMesh
+    from satprint.water import PART_COLORS, multicolor_parts
+
+    def solid(x):
+        m = heightmap_to_mesh(np.zeros((2, 2)), 1, 1, 1)
+        return BuildingMesh(
+            m.vertices + np.float32([x, 0, 0]),
+            m.faces[:2],
+            m.faces[2:],
+            1,
+        )
+
+    relief = np.ones((5, 5))
+    parts, _ = multicolor_parts(
+        [], BBOX, relief, 10, 10, 1, buildings=solid(1), bridges=solid(5)
+    )
+    assert [p[0] for p in parts] == ["land", "water", "buildings", "roads"]
+    assert parts[3][1].vertices[:, 0].min() == pytest.approx(5)
+    assert PART_COLORS["roads"] == PART_COLORS["border"]
+    assert len(set(PART_COLORS.values())) == 4
+
+
 def _lake_heightmap():
     """A 40 m plain over tile (14, 4824, 6157) with a lake reading 90 m."""
     n = 2**14

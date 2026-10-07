@@ -172,7 +172,6 @@ def _build(args) -> int:
             info["height_mm"] = max(
                 info["height_mm"], float(brmesh.vertices[:, 2].max())
             )
-            bmesh = merge_building_meshes(*(m for m in (bmesh, brmesh) if m))
     rmesh = None
     if args.roads:
         assert hm.bbox is not None
@@ -197,7 +196,7 @@ def _build(args) -> int:
                 info["height_mm"], float(rmesh.vertices[:, 2].max())
             )
     # buildings, bridges and roads: everything standing on the terrain
-    extras = merge_building_meshes(*(m for m in (bmesh, rmesh) if m))
+    extras = merge_building_meshes(*(m for m in (bmesh, brmesh, rmesh) if m))
     solid = merge_meshes(body, extras.as_mesh()) if extras.count else body
     write_binary_stl(solid, args.output, name=args.name)
     info["triangles"] = solid.triangle_count
@@ -222,7 +221,11 @@ def _build(args) -> int:
                         dict.fromkeys(
                             [IMAGERY_ATTRIBUTION]
                             + ([building_credit] if bmesh and bmesh.count else [])
-                            + ([OSM_ATTRIBUTION] if rmesh and rmesh.count else [])
+                            + (
+                                [OSM_ATTRIBUTION]
+                                if (rmesh and rmesh.count) or (brmesh and brmesh.count)
+                                else []
+                            )
                         )
                     ),
                     buildings=extras,
@@ -245,6 +248,7 @@ def _build(args) -> int:
             buildings=bmesh,
             frame=frame,
             roads=rmesh,
+            bridges=brmesh,
         )
         with open(args.threemf, "wb") as fh:
             credits = [OSM_ATTRIBUTION]  # the water
@@ -345,8 +349,9 @@ def main(argv=None) -> int:
     b.add_argument(
         "--3mf",
         dest="threemf",
-        help="also write a multi-color 3MF here: land, water, buildings "
-        "(and bridges), roads and border as separate parts (needs --bbox)",
+        help="also write a multi-color 3MF here: land, water, buildings, "
+        "roads (and bridges) and border as separate parts on four filaments, "
+        "roads and border sharing one (needs --bbox)",
     )
     b.add_argument(
         "--buildings",

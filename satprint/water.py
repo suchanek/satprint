@@ -16,7 +16,7 @@ from shapely import Polygon
 from shapely.ops import unary_union
 
 from .buildings import _polygons, model_projection, vector_tile_features
-from .mesh import BuildingMesh, Mesh, heightmap_split_solids
+from .mesh import BuildingMesh, Mesh, heightmap_split_solids, merge_building_meshes
 from .terrain import BBox, Heightmap, _tile_count
 
 # OpenMapTiles water classes worth coloring; swimming pools (often on
@@ -26,13 +26,15 @@ WATER_CLASSES = {"ocean", "sea", "lake", "river", "pond", "reservoir", "basin", 
 STILL_WATER = {"ocean", "sea", "lake", "reservoir", "pond", "basin"}
 SHORE_PX = (1.0, 3.0)  # the shore sampled between these distances from the water
 MAX_WATER_TILES = 16  # water zoom drops until the area fits in this many tiles
-# Display colors for the 3MF parts; the slicer picks the filaments.
+# Display colors for the 3MF parts. Parts of one color share a filament, so
+# roads and border print in one gray and the model needs at most four
+# filaments, what an AMS lite holds.
 PART_COLORS = {
     "land": "#8A9A5B",
     "water": "#2F6FB3",
     "buildings": "#E8E8E8",
     "roads": "#4A4A4A",
-    "border": "#3A3A3A",
+    "border": "#4A4A4A",
 }
 
 
@@ -185,12 +187,15 @@ def multicolor_parts(
     buildings: BuildingMesh | None = None,
     frame: Mesh | None = None,
     roads: BuildingMesh | None = None,
+    bridges: BuildingMesh | None = None,
 ) -> tuple[list[tuple[str, Mesh, str]], np.ndarray]:
     """The 3MF parts, land, water, buildings, roads and border, and the water
     mask.
 
-    Parts without geometry are left out, so the filament numbers stay in this
-    order: land 1, water 2, then buildings, roads and border as present.
+    Bridges go in the roads part, so they print in the road color. Parts
+    without geometry are left out; :func:`write_3mf` numbers the filaments by
+    color in this order: land 1, water 2, then buildings and the gray of roads
+    and border as present.
 
     :return: ([(name, mesh, color), ...] for :func:`write_3mf`, mask).
     """
@@ -202,8 +207,9 @@ def multicolor_parts(
     ]
     if buildings is not None and buildings.count:
         parts.append(("buildings", buildings.as_mesh(), PART_COLORS["buildings"]))
-    if roads is not None and roads.count:
-        parts.append(("roads", roads.as_mesh(), PART_COLORS["roads"]))
+    deck = merge_building_meshes(*(m for m in (roads, bridges) if m is not None))
+    if deck.count:
+        parts.append(("roads", deck.as_mesh(), PART_COLORS["roads"]))
     if frame is not None:
         parts.append(("border", frame, PART_COLORS["border"]))
     return parts, mask

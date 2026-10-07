@@ -27,15 +27,19 @@ STILL_WATER = {"ocean", "sea", "lake", "reservoir", "pond", "basin"}
 SHORE_PX = (1.0, 3.0)  # the shore sampled between these distances from the water
 MAX_WATER_TILES = 16  # water zoom drops until the area fits in this many tiles
 # Display colors for the 3MF parts. Parts of one color share a filament, so
-# roads and border print in one gray and the model needs at most four
-# filaments, what an AMS lite holds.
+# the border prints in the land filament and the model needs at most four
+# filaments, what an AMS lite holds. A gray border would add a filament
+# change to every layer of the base.
 PART_COLORS = {
     "land": "#8A9A5B",
     "water": "#2F6FB3",
     "buildings": "#E8E8E8",
     "roads": "#4A4A4A",
-    "border": "#4A4A4A",
+    "border": "#8A9A5B",
 }
+# The water part is a skin this thick; the land filament fills the base under
+# it, so the lower layers need no filament change for water.
+WATER_SKIN_MM = 0.6
 
 
 def water_zoom(bbox: BBox) -> int:
@@ -200,7 +204,9 @@ def multicolor_parts(
     :return: ([(name, mesh, color), ...] for :func:`write_3mf`, mask).
     """
     mask = water_mask(polygons, bbox, relief_mm, width_mm, depth_mm, sea_level_flat)
-    water, land = heightmap_split_solids(relief_mm, width_mm, depth_mm, base_mm, mask)
+    water, land = heightmap_split_solids(
+        relief_mm, width_mm, depth_mm, base_mm, mask, skin_mm=WATER_SKIN_MM
+    )
     parts = [
         ("land", land, PART_COLORS["land"]),
         ("water", water, PART_COLORS["water"]),

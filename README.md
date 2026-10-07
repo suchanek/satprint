@@ -68,8 +68,8 @@ exaggeration:
   the STL, GLB and 3MF. Which roads are drawn depends on the model scale.
 - **Multi-color 3MF.** Land, water, buildings, roads and an optional border
   frame are separate parts of one object, already on filaments 1 to 4 in
-  Bambu Studio and centered on the plate. Roads, bridges and border share a
-  gray filament.
+  Bambu Studio and centered on the plate. The border shares the land
+  filament, and bridges print with the roads.
   Water is the OSM sea, rivers and lakes, plus the flattened sea.
 - **Border frame.** A rectangular rim around the model, 1 mm above the base by
   default, in the STL, GLB and 3MF.
@@ -134,10 +134,9 @@ fits an AMS lite:
 | 2 | `water` | blue |
 | 3 | `buildings` | white |
 | 4 | `roads` | dark gray |
-| 4 | `border` | dark gray |
+| 1 | `border` | green |
 
-Roads and the border share one gray filament, and bridges are in the `roads`
-part. Parts without geometry are left out, and the filaments after them move
+The border prints in the land filament, and bridges are in the `roads` part. Parts without geometry are left out, and the filaments after them move
 up one.
 
 To print it on a Bambu printer with an AMS:

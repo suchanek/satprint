@@ -351,7 +351,7 @@ def main(argv=None) -> int:
         dest="threemf",
         help="also write a multi-color 3MF here: land, water, buildings, "
         "roads (and bridges) and border as separate parts on four filaments, "
-        "roads and border sharing one (needs --bbox)",
+        "the border on the land filament (needs --bbox)",
     )
     b.add_argument(
         "--buildings",

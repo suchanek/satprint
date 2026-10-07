@@ -90,6 +90,31 @@ def test_split_solids_are_closed_and_fill_the_block(seed):
     assert wet.volume_mm3() > 0 and dry.volume_mm3() > 0
 
 
+@pytest.mark.parametrize("seed", range(3))
+def test_split_with_a_skin_keeps_the_masked_solid_thin(seed):
+    rng = np.random.default_rng(seed)
+    relief = rng.random((25, 35)) * 8
+    mask = _fix_diagonals(rng.random((24, 34)) < 0.35)
+    wet, dry = heightmap_split_solids(relief, 70, 50, 2, mask, skin_mm=0.6)
+    assert check_watertight(wet)["watertight"] and check_watertight(dry)["watertight"]
+    whole = heightmap_to_mesh(relief, 70, 50, 2).volume_mm3()
+    assert wet.volume_mm3() + dry.volume_mm3() == pytest.approx(whole, rel=1e-6)
+    # a 0.6 mm skin over the masked cells' area, each cell 70/34 x 50/24 mm
+    area = mask.sum() * (70 / 34) * (50 / 24)
+    assert wet.volume_mm3() == pytest.approx(0.6 * area, rel=1e-6)
+    assert wet.vertices[:, 2].min() > 2 - 0.6
+
+
+def test_skin_over_an_all_masked_block():
+    relief = np.ones((5, 6))
+    wet, dry = heightmap_split_solids(
+        relief, 10, 10, 1, np.ones((4, 5), bool), skin_mm=0.5
+    )
+    assert check_watertight(wet)["watertight"] and check_watertight(dry)["watertight"]
+    assert wet.volume_mm3() == pytest.approx(50)  # 10 x 10 x 0.5
+    assert dry.volume_mm3() == pytest.approx(150)  # 10 x 10 x (2 - 0.5)
+
+
 def test_split_with_all_or_nothing_masked():
     relief = np.ones((5, 6))
     wet, dry = heightmap_split_solids(relief, 10, 10, 1, np.ones((4, 5), bool))
@@ -197,7 +222,7 @@ def test_bridges_print_with_the_roads():
     )
     assert [p[0] for p in parts] == ["land", "water", "buildings", "roads"]
     assert parts[3][1].vertices[:, 0].min() == pytest.approx(5)
-    assert PART_COLORS["roads"] == PART_COLORS["border"]
+    assert PART_COLORS["border"] == PART_COLORS["land"]
     assert len(set(PART_COLORS.values())) == 4
 
 

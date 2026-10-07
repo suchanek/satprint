@@ -59,7 +59,7 @@ Francisco, printed in their own color from the 3MF:
 - **Roads** from OpenStreetMap, as raised strips that follow the terrain.
 - **Four filaments.** Land, water, buildings, roads and a border frame are
   separate parts of one 3MF object, already on filaments 1 to 4 in Bambu
-  Studio and centered on the plate. Roads, bridges and border share a gray.
+  Studio and centered on the plate. The border shares the land filament.
 - **Search and presets.** Search any place by name, or pick one of 70 presets:
   40 cities and landmarks and 30 mountains and landscapes.
 

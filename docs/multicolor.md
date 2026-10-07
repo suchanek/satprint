@@ -9,10 +9,9 @@ filaments, so it fits an AMS lite:
 | 2 | `water` | blue |
 | 3 | `buildings` | white |
 | 4 | `roads` | dark gray |
-| 4 | `border` | dark gray |
+| 1 | `border` | green |
 
-Roads and the border share one gray filament, and bridges are in the `roads`
-part. Parts without geometry are left out, and the filaments after them move
+The border prints in the land filament, and bridges are in the `roads` part. Parts without geometry are left out, and the filaments after them move
 up one: there is no `buildings` part without buildings, no `roads` part
 without roads or bridges, and no `border` part without a frame.
 
@@ -53,8 +52,10 @@ filaments by hand.
   layer, plus the flattened sea. Swimming pools are left out, since many are on
   roofs.
 - **Land and water** are the terrain block split along that water map, one
-  grid cell at a time. The two solids meet exactly and fill the same block
-  together. A river narrower than one grid cell does not show, so raise the
+  grid cell at a time. The water is a skin 0.6 mm thick, and the land
+  filament fills the base under it, so the lower layers print in one color
+  with no filament changes for water. The two solids meet exactly and fill
+  the same block together. A river narrower than one grid cell does not show, so raise the
   resolution to keep it.
 - **Buildings** are the same solids as in the STL, sunk 0.3 mm into the
   terrain. Slicers resolve that overlap.

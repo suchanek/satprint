@@ -437,7 +437,7 @@ def load_heightmap_file(
     if filename.lower().endswith((".tif", ".tiff")):
         try:
             # rasterio is the optional `geotiff` extra.
-            from rasterio.io import MemoryFile  # ty: ignore[unresolved-import]
+            from rasterio.io import MemoryFile
 
             with MemoryFile(data) as mem, mem.open() as ds:
                 arr = ds.read(1).astype(np.float32)

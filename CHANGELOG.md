@@ -6,6 +6,8 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.1] - 2026-11-02
+
 ### Security
 
 - **Pillow 13.0.0 is the floor.** The `pillow>=10` range let a fresh

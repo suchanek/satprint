@@ -2521,4 +2521,4 @@ overture = ["overturemaps"]
 [metadata]
 lock-version = "2.1"
 python-versions = ">=3.12,<3.14"
-content-hash = "e25a0ff8382ffefd7d4ac7cb49e7e06c0c5473da1b6b25a4e4e23a10ca70ded7"
+content-hash = "3751fde5d742569b9785406a0d4ff3c53c85fb2711617f8088d45cc1285b6bae"

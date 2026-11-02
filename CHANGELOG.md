@@ -6,6 +6,20 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Security
+
+- **Pillow 13.0.0 is the floor.** The `pillow>=10` range let a fresh
+  install resolve Pillow 12.3.0, which carries 41 advisories fixed in
+  13.0.0, including critical ones. The lock also moves certifi to
+  2026.10.23, filelock to 4.2.7, virtualenv to 21.15.2 and
+  opentelemetry-api to 1.45.2, clearing the 69 open Dependabot alerts.
+
+### Changed
+
+- **CI type-checks with the `geotiff` extra installed**, so `rasterio`
+  resolves there as it does in the full dev venv, and the type check covers
+  the GeoTIFF path.
+
 ## [0.5.0] - 2026-10-07
 
 ### Added

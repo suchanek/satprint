@@ -1,18 +1,16 @@
-# Release Notes -- v0.5.1
+# Release Notes -- v0.5.2
 
-> Released: 2026-11-02
+> Released: 2026-11-23
 
-satprint 0.5.1 is a security release. It requires Pillow 13.0.0 or later, so a fresh install can no longer resolve Pillow 12.3.0, which carries 41 advisories fixed in 13.0.0, some of them critical. Nothing about the terrain, the meshes or the 3MF output changes.
+satprint 0.5.2 changes the license from MIT to the BSD 3-Clause License. The code, the terrain, the meshes and the 3MF output are the same as in 0.5.1.
 
 ## What changed
 
-**Pillow 13 is the floor.** satprint reads and writes images through Pillow, and its old range, `pillow>=10`, allowed the vulnerable 12.x line. The floor is now 13.0.0. The lock moves certifi, filelock, virtualenv and opentelemetry-api to patched releases too, which clears every open Dependabot alert.
-
-**CI type-checks the GeoTIFF path.** The type-check job now installs the `geotiff` extra, so it sees `rasterio` the way a full development install does and checks the code that reads GeoTIFF georeferencing.
+**BSD-3-Clause license.** satprint now uses the same license as the other science and visualization packages it is published alongside: quiltwright, pypdb2pov, turtlend and proteusPy. Both licenses are permissive. BSD-3-Clause adds one condition: you may not use the author's name to endorse or promote a product built from satprint without written permission. Releases 0.1.0 through 0.5.1 remain under MIT.
 
 ## Upgrading
 
-Upgrade with `pip install -U satprint`. pip moves Pillow to 13.x if an older version is installed. No settings, presets or saved models change.
+Upgrade with `pip install -U satprint`. Nothing else changes: no settings, presets or saved models.
 
 ---
 

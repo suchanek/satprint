@@ -6,6 +6,8 @@ project uses [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+## [0.5.2] - 2026-11-23
+
 ### Changed
 
 - **satprint is now BSD-3-Clause**, in line with the fleet's other

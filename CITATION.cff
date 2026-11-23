@@ -20,7 +20,7 @@ version: "0.5.1"
 date-released: "2026-11-02"
 # The Zenodo concept DOI, which resolves to the newest archived release.
 doi: "10.5281/zenodo.23094151"
-license: MIT
+license: BSD-3-Clause
 repository-code: "https://github.com/suchanek/satprint"
 url: "https://suchanek.github.io/satprint/"
 keywords:

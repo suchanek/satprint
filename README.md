@@ -8,7 +8,7 @@
 [![Tests](https://github.com/suchanek/satprint/actions/workflows/tests.yml/badge.svg)](https://github.com/suchanek/satprint/actions/workflows/tests.yml)
 [![Docs](https://github.com/suchanek/satprint/actions/workflows/docs.yml/badge.svg)](https://suchanek.github.io/satprint/)
 [![Python](https://img.shields.io/badge/python-3.12%20%7C%203.13-blue.svg)](https://www.python.org/)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://github.com/suchanek/satprint/blob/main/LICENSE)
+[![License: BSD-3-Clause](https://img.shields.io/badge/License-BSD%203--Clause-blue.svg)](https://github.com/suchanek/satprint/blob/main/LICENSE)
 [![PyPI](https://img.shields.io/pypi/v/satprint.svg)](https://pypi.org/project/satprint/)
 [![Version](https://img.shields.io/badge/version-0.5.1-blue.svg)](https://github.com/suchanek/satprint/releases)
 [![Poetry](https://img.shields.io/endpoint?url=https://python-poetry.org/badge/v0.json)](https://python-poetry.org/)
@@ -351,7 +351,7 @@ build the image yourself.
 
 ## License
 
-MIT. See [LICENSE](https://github.com/suchanek/satprint/blob/main/LICENSE).
+BSD-3-Clause. See [LICENSE](https://github.com/suchanek/satprint/blob/main/LICENSE).
 
 Map data: Terrain Tiles © Mapzen and AWS Open Data (SRTM, ASTER GDEM, GMTED2010,
 ETOPO1, NED, EU-DEM and others). Imagery © Esri, Maxar, Earthstar Geographics.

@@ -45,7 +45,7 @@ name = "satprint"
 version = "0.5.1"
 description = "Satellite terrain to 3D-printable models: watertight STL, multi-color 3MF and textured GLB, with OpenStreetMap buildings"
 readme = "README.md"
-license = "MIT"
+license = "BSD-3-Clause"
 license-files = ["LICENSE"]
 authors = [{ name = "Eric G. Suchanek, PhD", email = "suchanek@flux-frontiers.com" }]
 keywords = [
